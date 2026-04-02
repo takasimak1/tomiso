@@ -1,0 +1,153 @@
+/* 共通スタイル */
+body {
+    font-family: "Arial", sans-serif;
+    background-color: #f9f9f9;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* ヘッダー */
+header {
+    background: #ffccdd;
+    padding: 15px;
+    text-align: center;
+    font-size: 24px;
+    font-weight: bold;
+    color: #333;
+    border-bottom: 3px solid #ff99aa;
+}
+
+/* フッター */
+footer {
+    background: #ffccdd;
+    text-align: center;
+    padding: 10px;
+    font-size: 14px;
+    margin-top: 20px;
+}
+
+/* カテゴリーボタン */
+.category-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.category-button {
+    display: inline-block;
+    padding: 10px 20px;
+    background: #ff6699;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    text-align: center;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.category-button:hover {
+    background: #ff3366;
+}
+
+/* 商品カード */
+.product-card {
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: transform 0.3s ease-in-out;
+    cursor: pointer;
+}
+
+.product-card:hover {
+    transform: scale(1.05);
+}
+
+.product-card img {
+    width: 100%;
+    height: 200px;
+    object-fit: contain; /* 画像の縦横比を保持しつつ、余白をつける */
+    background: white;
+}
+
+.card-body {
+    padding: 15px;
+    text-align: center;
+    background: white;
+}
+
+.card-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+}
+
+/* ソート・検索ボックス */
+.search-box, .sort-box {
+    background: #fff;
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.cute-input {
+    border-radius: 10px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    padding-right: 30px; /* 矢印のスペースを確保 */
+    width: 50%;
+}
+
+.btn-cute {
+    background: #ff6699;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 10px;
+    transition: background 0.3s;
+}
+
+.btn-cute:hover {
+    background: #ff3366;
+}
+
+.product-img {
+    max-height: 300px;  /* 最大高さを300pxに設定 */
+    width: auto;        /* 幅は自動調整（縦横比を保持） */
+    object-fit: contain; /* 画像の縦横比を保持しつつ、枠に収める */
+    margin: 10px auto;   /* 余白を追加（上下左右の余白を調整） */
+    display: block;      /* 画像が中央に配置されるように */
+}
+
+.row.align-items-start {
+    align-items: flex-start;
+}
+
+.login-box {
+  max-width: 400px;      /* スマホサイズの幅に制限 */
+  margin: 0 auto;        /* 中央寄せ */
+  padding: 2rem;         /* 内側余白 */
+  background-color: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+}
+.product-price {
+  font-family: 'PokusMA', sans-serif;
+  color: red;
+  font-size: 2.5em;
+  vertical-align: -0.2em;
+  /* 必要に応じて他のスタイルを追加 */
+}
+
+@font-face {
+  font-family: 'PokusMA';
+  src: url('../fonts/PokusMA.woff2') format('woff2');
+}

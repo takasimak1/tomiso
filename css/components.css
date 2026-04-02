@@ -1,0 +1,140 @@
+/* ============================================================
+   components.css  再利用UIコンポーネント
+   複数画面で使い回すボタン・カード・バッジ等
+   ============================================================ */
+
+/* ============================================================
+   ボタン基本
+   ============================================================ */
+.btn {
+    display: inline-block;
+    padding: var(--space-sm) var(--space-lg);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-md);
+    font-weight: bold;
+    cursor: pointer;
+    transition: background .15s, opacity .15s;
+    white-space: nowrap;
+    text-align: center;
+}
+.btn:disabled { background: var(--color-disabled) !important; cursor: not-allowed; opacity: .7; }
+
+/* プライマリ（登録・決定） */
+.btn-primary {
+    background: var(--color-primary);
+    color: var(--color-white);
+}
+.btn-primary:hover { background: var(--color-primary-light); }
+
+/* アクセント（カートへ追加等） */
+.btn-accent {
+    background: var(--color-accent);
+    color: var(--color-white);
+}
+.btn-accent:hover { background: var(--color-accent-light); }
+
+/* アウトライン */
+.btn-outline {
+    background: var(--color-white);
+    color: var(--color-primary);
+    border: 2px solid var(--color-primary);
+}
+.btn-outline:hover { background: var(--color-primary); color: var(--color-white); }
+
+/* ピル型（部門・フィルター） */
+.btn-pill {
+    border-radius: var(--radius-pill);
+    padding: var(--space-xs) var(--space-lg);
+    font-size: var(--font-size-md);
+    font-weight: bold;
+    border: 2px solid var(--color-primary);
+    background: var(--color-white);
+    color: var(--color-primary);
+    cursor: pointer;
+    transition: all .15s;
+}
+.btn-pill.active,
+.btn-pill:hover { background: var(--color-primary); color: var(--color-white); }
+
+/* 数量 +/- ボタン */
+.btn-qty {
+    width: 2em; height: 2em;
+    border-radius: 50%;
+    border: 2px solid var(--color-primary);
+    background: var(--color-white);
+    color: var(--color-primary);
+    font-size: var(--font-size-lg);
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.btn-qty:hover { background: var(--color-primary); color: var(--color-white); }
+
+/* タブ型（値引き 率/額） */
+.btn-tab {
+    padding: 0.2em 0.7em;
+    border-radius: var(--radius-pill);
+    border: 2px solid var(--color-accent);
+    background: var(--color-white);
+    color: var(--color-accent);
+    font-size: var(--font-size-sm);
+    font-weight: bold;
+    cursor: pointer;
+    transition: all .15s;
+}
+.btn-tab.active { background: var(--color-accent); color: var(--color-white); }
+
+/* 削除ボタン */
+.btn-del {
+    border: none; background: none;
+    color: var(--color-danger-light);
+    cursor: pointer;
+    font-size: var(--font-size-md);
+    padding: 0 0.2em;
+    line-height: 1;
+}
+
+/* ============================================================
+   フォーム部品
+   ============================================================ */
+.form-select-accent {
+    border: 2px solid var(--color-accent);
+    border-radius: var(--radius-sm);
+    padding: 0.25em 0.5em;
+    font-size: var(--font-size-md);
+    min-width: 7em;
+    background: var(--color-white);
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+/* ============================================================
+   カード
+   ============================================================ */
+.card-pos {
+    background: var(--color-white);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-md) var(--space-lg);
+}
+
+/* ============================================================
+   テキスト
+   ============================================================ */
+.text-price {
+    font-weight: bold;
+    color: var(--color-danger);
+}
+.text-muted-sm {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+}
+.qty-display {
+    font-size: var(--font-size-xl);
+    font-weight: bold;
+    min-width: 1.5em;
+    text-align: center;
+}

@@ -1,0 +1,149 @@
+/* ============================================================
+   pos.css  売上登録画面専用スタイル
+   variables.css / base.css / components.css を読み込んだ後に適用
+   ============================================================ */
+
+/* --- レイアウト --- */
+.pos-wrap {
+    display: grid;
+    grid-template-rows: auto auto 1fr;   /* パネル → 部門 → 商品リスト */
+    height: calc(100vh - var(--navbar-height));
+    overflow: hidden;
+}
+
+/* 入力・カートパネル（上部固定） */
+.pos-panel {
+    background: var(--color-white);
+    border-bottom: 2px solid var(--color-primary);
+    padding: var(--space-sm) var(--space-md);
+    box-shadow: var(--shadow-sm);
+}
+
+/* 部門ボタンエリア */
+.pos-bumon {
+    padding: var(--space-xs) var(--space-md);
+    background: var(--color-bg-panel);
+    border-bottom: 1px solid var(--color-primary-border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+}
+
+/* 商品リスト（スクロール） */
+.pos-shohin {
+    overflow-y: auto;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-bg-secondary);
+}
+
+/* --- 入力パネル内レイアウト --- */
+.panel-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+}
+
+/* 選択商品表示 */
+.sel-info { flex: 1; min-width: 8em; }
+.sel-info .s-name {
+    font-size: var(--font-size-md);
+    font-weight: bold;
+    color: var(--color-text-muted);   /* 未選択時はグレー、JS で上書き */
+}
+.sel-info .s-hint {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+}
+
+/* 数量エリア */
+.qty-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+/* 値引きタブ */
+.neb-tabs {
+    display: flex;
+    gap: var(--space-xs);
+    margin-bottom: var(--space-xs);
+}
+
+/* 販売金額表示 */
+.unit-price {
+    font-size: var(--font-size-lg);
+    font-weight: bold;
+    color: var(--color-danger);
+    white-space: nowrap;
+}
+
+/* --- カート --- */
+.cart-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-xs);
+    flex-wrap: wrap;
+}
+.cart-table {
+    font-size: var(--font-size-sm);
+    flex: 1;
+    min-width: 0;
+    border-collapse: collapse;
+}
+.cart-table td {
+    padding: 0.15em var(--space-sm);
+    white-space: nowrap;
+}
+.cart-total {
+    font-size: var(--font-size-lg);
+    font-weight: bold;
+    color: var(--color-danger);
+    white-space: nowrap;
+}
+.cart-empty-msg {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    margin-top: var(--space-xs);
+}
+
+/* --- 商品ボタン --- */
+.shohin-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-md);
+    margin-bottom: var(--space-xs);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-white);
+    cursor: pointer;
+    font-size: var(--font-size-md);
+    text-align: left;
+    width: 100%;
+    transition: all .15s;
+}
+.shohin-item:hover  {
+    border-color: var(--color-primary);
+    background: var(--color-primary-pale);
+}
+.shohin-item.active {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+    color: var(--color-white);
+}
+.shohin-item .s-price {
+    font-weight: bold;
+    color: var(--color-danger);
+    white-space: nowrap;
+    margin-left: var(--space-sm);
+    flex-shrink: 0;
+}
+.shohin-item.active .s-price { color: #a5d6a7; }
+.shohin-item .s-sub {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    display: block;
+}
+.shohin-item.active .s-sub { color: #ccc; }

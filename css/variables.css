@@ -1,0 +1,64 @@
+/* ============================================================
+   variables.css  デザイントークン
+   ここの値を変えるだけでシステム全体のデザインが変わる
+   ============================================================ */
+
+:root {
+    /* --- ブランドカラー --- */
+    --color-primary:       #004d40;   /* メインカラー（ナビ・ボタン）*/
+    --color-primary-light: #00695c;   /* ホバー */
+    --color-primary-pale:  #e8f5e9;   /* 選択背景 */
+    --color-primary-border:#c8d8c8;
+
+    --color-accent:        #00897b;   /* サブアクション（カートへ追加等）*/
+    --color-accent-light:  #00695c;
+
+    --color-danger:        #c62828;   /* 価格・警告 */
+    --color-danger-light:  #e53935;
+    --color-success:       #2e7d32;
+
+    /* --- ニュートラル --- */
+    --color-bg:            #f9f9f9;
+    --color-bg-secondary:  #fafafa;
+    --color-bg-panel:      #f0f4f0;
+    --color-white:         #ffffff;
+    --color-border:        #dddddd;
+    --color-border-strong: #004d40;
+    --color-text:          #333333;
+    --color-text-muted:    #888888;
+    --color-disabled:      #bbbbbb;
+
+    /* --- タイポグラフィ --- */
+    --font-family:         "Hiragino Kaku Gothic ProN", "ヒラギノ角ゴ ProN W3",
+                           "Noto Sans JP", "Arial", sans-serif;
+
+    /* ★ フォントサイズの基準
+       ここを変えるだけで pos.css 内の全要素が拡縮する
+       標準: 16px / タブレット店舗向け: 20px / 大画面: 24px */
+    --font-size-base:      20px;
+
+    --font-size-sm:        0.75rem;   /* 補足テキスト */
+    --font-size-md:        1rem;      /* 標準 */
+    --font-size-lg:        1.2rem;    /* 強調 */
+    --font-size-xl:        1.5rem;    /* 見出し */
+
+    /* --- スペーシング --- */
+    --space-xs:  0.25rem;
+    --space-sm:  0.5rem;
+    --space-md:  0.75rem;
+    --space-lg:  1rem;
+    --space-xl:  1.5rem;
+
+    /* --- 角丸 --- */
+    --radius-sm: 0.4em;
+    --radius-md: 0.6em;
+    --radius-lg: 1em;
+    --radius-pill: 999px;
+
+    /* --- シャドウ --- */
+    --shadow-sm: 0 2px 8px rgba(0,0,0,.08);
+    --shadow-md: 0 2px 12px rgba(0,0,0,.12);
+
+    /* --- ナビバー高さ（pos-wrapのheight計算に使用）--- */
+    --navbar-height: 58px;
+}

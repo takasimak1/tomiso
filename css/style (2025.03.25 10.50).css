@@ -1,0 +1,123 @@
+/* ==============================
+   共通スタイル
+   ============================== */
+body {
+    background-color: #fffaf0;
+    font-family: "Arial", sans-serif;
+}
+
+.container {
+    max-width: 1200px;
+    margin: auto;
+    padding: 20px;
+}
+
+h2 {
+    color: #ff6699;
+    font-weight: bold;
+}
+
+/* ==============================
+   ボタンスタイル
+   ============================== */
+.btn-custom {
+    background-color: #ff99cc;
+    color: white;
+    border-radius: 20px;
+    padding: 10px 20px;
+    text-decoration: none;
+    display: inline-block;
+    transition: background-color 0.3s;
+}
+
+.btn-custom:hover {
+    background-color: #ff66a3;
+}
+
+/* ==============================
+   商品カード
+   ============================== */
+.product-card {
+    border-radius: 15px;
+    overflow: hidden;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s;
+    background-color: white;
+    cursor: pointer;
+}
+
+.product-card:hover {
+    transform: scale(1.05);
+}
+
+.product-card img {
+    width: 100%;  /* 横幅はカードいっぱいに */
+    height: 200px; /* 高さを固定（調整可） */
+    object-fit: contain; /* 画像を縮小し、全体を表示（余白あり） */
+    background-color: #f8f9fa; /* 余白部分の背景色（オプション） */
+    display: block;
+    margin: auto; /* 画像を中央寄せ */
+}
+
+.product-card .card-body {
+    padding: 15px;
+    text-align: center;
+}
+
+.product-card h5 {
+    color: #ff6699;
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.product-card p {
+    font-size: 16px;
+    color: #333;
+}
+
+/* ==============================
+   ページネーション
+   ============================== */
+.pagination {
+    margin-top: 20px;
+}
+
+.pagination .page-item .page-link {
+    color: #ff6699;
+    border-radius: 10px;
+}
+
+.pagination .page-item.active .page-link {
+    background-color: #ff99cc;
+    border-color: #ff99cc;
+    color: white;
+}
+
+.pagination .page-item .page-link:hover {
+    background-color: #ff66a3;
+    color: white;
+}
+
+
+<!-- 可愛いデザインのための CSS -->
+.search-box {
+    background: #fff0f6; /* ほんのりピンク */
+    border: 2px solid #ff99c8; /* 可愛いピンクの枠 */
+    border-radius: 15px;
+}
+.cute-input {
+    border: 2px solid #ff99c8;
+    border-radius: 10px;
+}
+.btn-cute {
+    background: #ff66a3;
+    color: white;
+    font-weight: bold;
+    border-radius: 20px;
+    padding: 8px 20px;
+    transition: 0.3s;
+}
+.btn-cute:hover {
+    background: #ff3385;
+}

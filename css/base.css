@@ -1,0 +1,64 @@
+/* ============================================================
+   base.css  共通基盤スタイル
+   全画面で読み込む。画面固有のスタイルは各 page.css へ。
+   ============================================================ */
+
+/* --- リセット・ベース --- */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family);
+    font-size: var(--font-size-base);
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    margin: 0;
+    padding: 0;
+    line-height: 1.5;
+}
+
+/* --- コンテナ --- */
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: var(--space-lg);
+}
+
+/* --- ログインボックス --- */
+.login-box {
+    max-width: 420px;
+    margin: 0 auto;
+    padding: var(--space-xl);
+    background-color: var(--color-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+
+/* --- フォーム --- */
+.cute-input {
+    border-radius: var(--radius-md);
+    padding: var(--space-sm);
+    border: 1px solid var(--color-border);
+    width: 100%;
+}
+
+/* --- 商品画像 --- */
+.product-img {
+    max-height: 300px;
+    width: auto;
+    object-fit: contain;
+    margin: var(--space-sm) auto;
+    display: block;
+}
+
+/* --- カスタムフォント --- */
+@font-face {
+    font-family: 'PokusMA';
+    src: url('../fonts/PokusMA.woff2') format('woff2');
+    font-display: swap;
+}
+.product-price {
+    font-family: 'PokusMA', sans-serif;
+    color: var(--color-danger);
+    font-size: 2.5em;
+    vertical-align: -0.2em;
+}
