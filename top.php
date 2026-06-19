@@ -206,6 +206,18 @@ include __DIR__ . '/header.php';
     </a>
   </div>
 
+  <!-- プリンター設定 -->
+  <div style="margin-top:1.4em; text-align:center;">
+    <a href="https://play.google.com/store/apps/details?id=com.starmicronics.starquicksetuputility&pli=1"
+       target="_blank" rel="noopener"
+       style="display:inline-flex; align-items:center; gap:0.5em;
+              padding:0.6em 1.2em; border-radius:0.6em;
+              border:1.5px solid #ccc; background:#f9f9f9;
+              color:#444; font-size:0.82em; text-decoration:none;">
+      🖨️ Star レシートプリンター設定アプリ（Android）
+    </a>
+  </div>
+
 </div>
 
 <?php include __DIR__ . '/footer.php'; ?>
