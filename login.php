@@ -8,7 +8,8 @@ use fmRESTor\fmRESTor;
 session_start();
 
 if (isset($_SESSION['store_id'])) {
-    header('Location: top.php');
+    $dest = (($_SESSION['role'] ?? '') === 'hq') ? 'hq_top.php' : 'top.php';
+    header('Location: ' . $dest);
     exit();
 }
 
@@ -20,7 +21,20 @@ $account  = trim($_POST['account']  ?? '');
 $password = trim($_POST['password'] ?? '');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account !== '' && $password !== '') {
-    $fm = new fmRESTor($host, $db, 'account',
+
+    // ---- 本社アカウント（固定）----
+    if ($account === '000' && $password === '000') {
+        session_regenerate_id(true);
+        $_SESSION['user']       = '000';
+        $_SESSION['store_id']   = '000';
+        $_SESSION['store_name'] = '本社';
+        $_SESSION['role']       = 'hq';
+        header('Location: hq_top.php');
+        exit();
+    }
+
+    // ---- 店舗アカウント（account_API で照合）----
+    $fm = new fmRESTor($host, $db, $layout_account,
                        $api_master_user, $api_master_pass, ['allowInsecure' => true]);
     $result  = $fm->getRecords(['_limit' => 300]);
     $records = $result['result']['response']['data'] ?? [];
@@ -34,17 +48,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account !== '' && $password !== ''
     }
 
     if ($matched !== null) {
-        $fm_password = (string)($matched['password'] ?? '');
-        if ($password === $fm_password) {
+        $fm_password   = (string)($matched['password']   ?? '');
+        $eigyo_status  = trim((string)($matched['営業状態'] ?? ''));   // '営業中' or '閉店'
+
+        if ($password !== $fm_password) {
+            $error_message = 'アカウント名またはパスワードが間違っています。';
+        } elseif ($eigyo_status === '閉店') {
+            $error_message = 'この店舗は閉店済みのためログインできません。';
+        } else {
             session_regenerate_id(true);
-            $_SESSION['user']       = $account;
-            $_SESSION['store_id']   = (string)($matched['店舗Ｎｏ'] ?? '');
-            $_SESSION['store_name'] = $matched['店舗名'] ?? '';
-            $_SESSION['role']       = 'store';
+            $_SESSION['user']          = $account;
+            $_SESSION['store_id']      = (string)($matched['店舗Ｎｏ'] ?? '');
+            $_SESSION['store_name']    = $matched['店舗名'] ?? '';
+            $_SESSION['role']          = 'store';
+            $_SESSION['eigyo_status']  = $eigyo_status;   // '営業中' など
+            $_SESSION['heiten_bi']     = trim((string)($matched['閉店日'] ?? ''));
             header('Location: top.php');
             exit();
-        } else {
-            $error_message = 'アカウント名またはパスワードが間違っています。';
         }
     } else {
         $error_message = 'アカウント名またはパスワードが間違っています。';

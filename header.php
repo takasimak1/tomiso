@@ -9,7 +9,7 @@ $accountName = $_SESSION['store_name'] ?? $_SESSION['user'] ?? "未ログイン"
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>ととレジ</title>
 
     <!-- Bootstrap -->
@@ -55,6 +55,15 @@ $accountName = $_SESSION['store_name'] ?? $_SESSION['user'] ?? "未ログイン"
                 </li>
                 <li class="nav-item">
                     <a class="nav-link py-1" href="sales_list.php">📋 売上一覧</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link py-1" href="daily_report_entry.php">📊 売上日報入力</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link py-1" href="daily_report_mystore.php">📈 自店舗成績</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link py-1" href="shohin_maint.php">📦 商品メンテ</a>
                 </li>
                 <li class="nav-item border-top border-secondary mt-1 pt-1">
                     <a class="nav-link py-1 text-warning" href="logout.php">🚪 ログアウト</a>

@@ -1,0 +1,158 @@
+# ととレジ システム仕様書
+
+**株式会社富惣 / Web POS・売上管理システム**  
+開発開始: 2024年  
+リポジトリ: https://github.com/takasimak1/tomiso
+
+---
+
+## システム概要
+
+FileMaker DataAPI をバックエンドとした、食品小売業向け Web POS・売上管理システム。
+店舗スタッフが iPadなどのタブレット端末からレシート発行・日報入力を行い、
+本社が売上集計・昨対比をリアルタイムで把握する。
+
+---
+
+## 現行構成
+
+| レイヤー | 技術 |
+|---|---|
+| フロントエンド | HTML / CSS / Vanilla JS / Bootstrap 5 |
+| バックエンド | PHP 8.x / fmRESTor ライブラリ |
+| データベース | FileMaker Server（DataAPI 経由） |
+| レシートプリンター | Star Micronics mPOP（StarWebPRNT） |
+| バーコード | JsBarcode（EAN-13 インストアコード） |
+| ホスティング | kei1.me（共用サーバー）|
+
+### 主要ファイル構成
+
+```
+tomiso/
+├── login.php               # ログイン（account_API 照合）
+├── top.php                 # 店舗トップメニュー
+├── sales_entry.php         # POS レシート入力・発行（★中核）
+├── sales_confirm.php       # レシート訂正
+├── daily_report_entry.php  # 日報入力
+├── daily_report_mystore.php# 店舗向け月次サマリー
+├── hq_top.php              # 本社メニュー
+├── hq_seiseki.php          # 本社：店舗売上ランキング
+├── hq_store.php            # 本社：店舗別日次推移
+├── hq_jikanbetsu.php       # 本社：時間帯別集計
+├── hq_shohin_maint.php     # 商品マスターメンテ
+├── hq_tenpo_maint.php      # 店舗マスターメンテ（営業状態・インストアコード）
+├── instore_codes.php       # インストアコード暫定設定（→FM移行予定）
+├── fm_setting.php          # FM 接続設定（レイアウト定義）
+└── fm_config_secret.php    # FM API 認証情報（.gitignore 除外）
+```
+
+### FileMaker レイアウト
+
+| 変数名 | レイアウト名 | 用途 |
+|---|---|---|
+| $layout_tenpo | tenpo_API | 店舗マスタ |
+| $layout_account | account_API | アカウント・インストアコード管理 |
+| $layout_pos | pos_API | POS 明細（売上登録） |
+| $layout_hanbai | hanbai_API | 販売商品マスタ |
+| $layout_daily_report | daily_report_API | 売上日報 CRUD |
+| $layout_daily_report_sum | daily_report_sum_API | 日報集計・昨対 |
+
+---
+
+## 機能一覧
+
+### 店舗機能
+- [x] POS レシート発行（部門別・値引き対応）
+- [x] インストアコード（JAN-13）バーコード生成・印刷
+- [x] Star Micronics プリンター対応（StarWebPRNT）
+- [x] 日報入力（部門別売上）
+- [x] 月次売上サマリー表示（部門別・昨対）
+
+### 本社機能
+- [x] 店舗売上ランキング（当月累計・昨対）
+- [x] 店舗別日次推移（部門別内訳）
+- [x] 時間帯別集計
+- [x] 商品マスターメンテ（取扱店舗・セール設定）
+- [x] 店舗マスターメンテ（営業状態・閉店日・インストアコード）
+
+---
+
+## 今後の実装予定
+
+### ① オフライン書き込みキュー（優先度: 高）
+
+**背景**: 通信状態が悪い店舗でも、レシート印刷を確実に完了させる。
+
+**方針**:
+- レシート表示・印刷を FM 書き込みから切り離す
+- 書き込み失敗時はサーバーローカルキューに保存
+- アイドル時（ページロード・30秒タイマー）に自動再送信
+- 未送信件数を店舗トップに表示
+
+**レシート番号**:
+- FM 書き込み成功: FM RecordId（現行と同じ）
+- キュー時: `Q-YYYYMMDD-NNN` 形式
+
+**実装ファイル**:
+- `sales_queue.php`（新規）: キュー管理クラス
+- `sales_queue_data/`（新規ディレクトリ、gitignore 済み）
+- `sales_entry.php`（変更）: 書き込み前キュー保存・失敗フォールバック
+
+---
+
+### ② フレームワーク化・脱 FileMaker（優先度: 中長期）
+
+**背景**: FileMaker Server の保守コスト・ライセンス費用・スケーラビリティの限界。
+Web 標準技術へ段階移行し、長期運用コストを削減する。
+
+**移行方針（段階的）**:
+
+```
+Phase 1（現行）
+  FileMaker Server ← PHP（fmRESTor）← Browser
+
+Phase 2（準備）
+  FileMaker Server ← PHP（API抽象化レイヤー導入）← Browser
+  ※ FM への依存を interface に閉じ込める
+
+Phase 3（並行運用）
+  FileMaker Server ↘
+                    ← PHP（リポジトリパターン）← Browser
+  MySQL/PostgreSQL ↗
+
+Phase 4（移行完了）
+  MySQL/PostgreSQL ← PHP Framework（Laravel 等）← Browser
+```
+
+**API 抽象化レイヤー設計**:
+- `DataRepository` interface を定義
+- `FileMakerRepository` が現行 FM DataAPI を実装
+- `MysqlRepository` が移行後 DB を実装
+- 切り替えは設定ファイル1行で完了する構造
+
+**データモデル（予定）**:
+
+| テーブル | 対応 FM レイアウト |
+|---|---|
+| stores | account_API / tenpo_API |
+| products | hanbai_API |
+| sales_receipts | pos_API（ヘッダー） |
+| sales_items | pos_API（明細） |
+| daily_reports | daily_report_API |
+
+---
+
+## 運用・セキュリティ
+
+- `fm_config_secret.php` は `.gitignore` 除外（認証情報の Git 管理禁止）
+- 本番サーバーへのデプロイは FTP / rsync（CI/CD 検討中）
+- `sales_queue_data/` は Web 非公開ディレクトリに配置（`.htaccess` で直接アクセス禁止）
+
+---
+
+## 開発メモ
+
+- FileMaker フィールド名に全角文字を多用（例: `店舗Ｎｏ`（全角Ｎ））。PHP 側でそのまま文字列キーとして使用
+- 昨対比計算: `$max_cy_day` で当年最終日を基準に前年を同日数でカット（公平比較）
+- インストアコード: `account_API` の `インストアコード_*` フィールド（テキスト7桁）で店舗別管理
+

@@ -7,6 +7,7 @@
 use fmRESTor\fmRESTor;
 session_start();
 if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
+if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
 
@@ -154,12 +155,12 @@ include __DIR__ . '/header.php';
 /* 訂正ボタン */
 .btn-edit {
     flex-shrink: 0;
-    background: #fff;
-    color: #c62828;
-    border: 2px solid #c62828;
+    background: #c62828;
+    color: #fff;
+    border: none;
     border-radius: 0.4em;
-    padding: 0.15em 0.6em;
-    font-size: 0.7em;
+    padding: 0.35em 0.85em;
+    font-size: 0.85em;
     font-weight: bold;
     cursor: pointer;
     white-space: nowrap;
@@ -167,8 +168,10 @@ include __DIR__ . '/header.php';
     text-decoration: none;
     display: inline-flex;
     align-items: center;
+    gap: 0.25em;
+    box-shadow: 0 1px 3px rgba(0,0,0,.2);
 }
-.btn-edit:hover { background: #c62828; color: #fff; }
+.btn-edit:hover { background: #b71c1c; }
 
 /* 明細テーブル */
 .detail-table-wrap { display: none; padding: 0.3em 0.5em 0.5em; }
@@ -298,7 +301,7 @@ include __DIR__ . '/header.php';
               ?>
               <a class="btn-edit" href="sales_edit.php?data=<?= urlencode($edit_data) ?>"
                  onclick="event.stopPropagation();">
-                訂正
+                ✏ 訂正
               </a>
             <?php endif; ?>
             <span class="rh-arrow">▼</span>

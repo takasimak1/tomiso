@@ -79,17 +79,17 @@ include __DIR__ . '/header.php';
 .receipt-header .store { font-size: 1.1em; font-weight: bold; color: #004d40; }
 .receipt-header .date  { font-size: 0.7em; color: #888; margin-top: 0.2em; }
 .receipt-header .badge-ok {
-    display: inline-block;
-    background: #e8f5e9;
-    color: #2e7d32;
-    border: 2px solid #2e7d32;
-    border-radius: 2em;
-    font-size: 0.8em;
+    display: block;
+    font-size: 1.1em;
     font-weight: bold;
-    padding: 0.2em 0.9em;
-    margin-top: 0.5em;
+    color: #222;
+    margin-top: 0.4em;
 }
 
+.rcpt-not-receipt {
+    font-size: 0.72em; color: #555;
+    margin-top: 0.1em;
+}
 .receipt-table {
     width: 100%;
     border-collapse: collapse;
@@ -168,7 +168,8 @@ include __DIR__ . '/header.php';
     <div class="receipt-header">
       <div class="store">🐟 <?= htmlspecialchars($store_name) ?></div>
       <div class="date"><?= htmlspecialchars($date) ?></div>
-      <div class="badge-ok">✓ 登録完了（<?= $count ?>点）</div>
+      <div class="badge-ok">明細書</div>
+      <div class="rcpt-not-receipt">領収書ではありません</div>
     </div>
 
     <table class="receipt-table">

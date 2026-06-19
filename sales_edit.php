@@ -32,33 +32,47 @@ $nebiki_gaku_master  = [50, 100, 200, 300];
 
 $error_message = '';
 
-// 販売商品マスタ取得（新商品追加用）
-$fm2       = new fmRESTor($host, $db, $layout_hanbai, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
-$res2      = $fm2->getRecords(['_limit' => 500]);
-$all_products = [];
-foreach ($res2['result']['response']['data'] ?? [] as $row) {
-    $f = $row['fieldData'];
-    $toriatsukai = trim($f['取扱店舗'] ?? '');
-    if ($toriatsukai !== '' && $toriatsukai !== $store_id) continue;
-    $n = trim($f['商品名'] ?? '');
-    if ($n === '') continue;
-    $all_products[] = [
-        'bumon' => trim($f['部門']     ?? ''),
-        'name'  => $n,
-        'tani'  => trim($f['販売単位'] ?? ''),
-        'price' => (int)($f['本体価格'] ?? 0),
-    ];
-}
-usort($all_products, fn($a,$b) => strcmp($a['yomi'] ?? $a['name'], $b['yomi'] ?? $b['name']));
+$is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+        && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
-// POST: 訂正登録
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $new_items = json_decode($_POST['cart_items'] ?? '[]', true) ?? [];
-    $del_ids   = json_decode($_POST['record_ids']  ?? '[]', true) ?? [];
+// ---- POST: レシート全体削除 ----
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_ajax) {
+    $json_body = json_decode(file_get_contents('php://input'), true) ?? [];
+    header('Content-Type: application/json');
 
-    if (empty($new_items)) {
-        $error_message = '訂正内容が空です。';
-    } else {
+    // 全体削除モード
+    if (!empty($json_body['action']) && $json_body['action'] === 'delete_all') {
+        $del_ids = $json_body['record_ids'] ?? [];
+        $fm = new fmRESTor($host, $db, $layout_pos, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+        $fail = 0;
+        foreach ($del_ids as $rid) {
+            $r = $fm->deleteRecord((int)$rid);
+            if ($fm->isError($r)) $fail++;
+        }
+        // ヘッダーも削除
+        $hdr_no = $json_body['receipt_no'] ?? '';
+        if ($hdr_no !== '') {
+            $fmH = new fmRESTor($host, $db, 'sales_header_API', $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+            $fmH->deleteRecord((int)$hdr_no);
+        }
+        if ($fail === 0) {
+            echo json_encode(['ok' => true]);
+        } else {
+            echo json_encode(['ok' => false, 'error' => $fail . '件の削除に失敗しました。']);
+        }
+        exit();
+    }
+
+    // 訂正登録モード（AJAX）
+    if (!empty($json_body['action']) && $json_body['action'] === 'update') {
+        $new_items = $json_body['cart_items'] ?? [];
+        $del_ids   = $json_body['record_ids'] ?? [];
+
+        if (empty($new_items)) {
+            echo json_encode(['ok' => false, 'error' => '訂正内容が空です。']);
+            exit();
+        }
+
         $fm = new fmRESTor($host, $db, $layout_pos, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
 
         // 既存明細を全件削除
@@ -70,12 +84,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 訂正内容を新規登録
         $reg_fail = 0;
+        $total = 0;
         foreach ($new_items as $item) {
             $honbai     = (int)($item['price']         ?? 0);
             $suryo      = (int)($item['qty']           ?? 1);
             $neb_gaku   = (int)($item['nebiki_gaku']   ?? 0);
             $neb_ritsu  = (float)($item['nebiki_ritsu'] ?? 0);
             $hanbai_kin = ($honbai - $neb_gaku) * $suryo;
+            $total += $hanbai_kin;
             $r = $fm->createRecord(['fieldData' => [
                 '販売日時'    => $date_fm,
                 '店舗No'     => $store_id,
@@ -94,15 +110,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($del_fail === 0 && $reg_fail === 0) {
-            header('Location: sales_list.php?date=' . $date_raw . '&edited=' . $receipt_no);
-            exit();
+            echo json_encode(['ok' => true, 'receipt_no' => $receipt_no, 'total' => $total, 'count' => count($new_items)]);
         } else {
-            $error_message = '訂正処理中にエラーが発生しました。'
-                . ($del_fail > 0 ? "（削除失敗:{$del_fail}件）" : '')
-                . ($reg_fail > 0 ? "（登録失敗:{$reg_fail}件）" : '');
+            $msg = '訂正処理中にエラーが発生しました。';
+            if ($del_fail > 0) $msg .= "（削除失敗:{$del_fail}件）";
+            if ($reg_fail > 0) $msg .= "（登録失敗:{$reg_fail}件）";
+            echo json_encode(['ok' => false, 'error' => $msg]);
         }
+        exit();
     }
 }
+
+// 販売商品マスタ取得（新商品追加用）
+$fm2       = new fmRESTor($host, $db, $layout_hanbai, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+$res2      = $fm2->getRecords(['_limit' => 500]);
+$all_products = [];
+foreach ($res2['result']['response']['data'] ?? [] as $row) {
+    $f = $row['fieldData'];
+    $toriatsukai = trim($f['取扱店舗'] ?? '');
+    if ($toriatsukai !== '' && $toriatsukai !== $store_id) continue;
+    $n = trim($f['商品名'] ?? '');
+    if ($n === '') continue;
+    $all_products[] = [
+        'bumon' => trim($f['部門']     ?? ''),
+        'name'  => $n,
+        'tani'  => trim($f['販売単位'] ?? ''),
+        'price' => (int)($f['本体価格'] ?? 0),
+    ];
+}
+usort($all_products, fn($a,$b) => strcmp($a['yomi'] ?? $a['name'], $b['yomi'] ?? $b['name']));
 
 // 元データをJS用に整形
 $initial_cart = array_map(fn($it) => [
@@ -176,9 +212,10 @@ echo '</div>';
 .iqty-num { font-weight: bold; min-width: 1.4em; text-align: center; font-size: 0.95em; }
 
 /* インライン値引き */
-.inline-neb select {
+.inline-neb select, .ci-neb {
     border: 1.5px solid #00897b; border-radius: 0.3em;
-    padding: 0.15em 0.3em; font-size: 0.8em; max-width: 6em;
+    padding: 0.15em 0.3em; font-size: 0.8em; max-width: 7em;
+    color: #00897b; background: #fff;
 }
 
 /* 行削除ボタン */
@@ -253,7 +290,135 @@ echo '</div>';
 .btn-register:hover { background: #b71c1c; }
 .btn-register:disabled { background: #bbb; cursor: not-allowed; }
 .cart-empty-msg { color: #aaa; font-size: 0.85em; padding: 0.8em; text-align: center; }
+
+/* 全体削除ボタン */
+.btn-delete-all {
+    background: #fff; color: #e53935; border: 2px solid #e53935;
+    border-radius: 0.5em; padding: 0.65em 1em;
+    font-size: 0.9em; font-weight: bold; cursor: pointer;
+    white-space: nowrap;
+}
+.btn-delete-all:hover { background: #e53935; color: #fff; }
+
+/* トースト */
+.toast-msg {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+    color: #fff; padding: 0.7em 1.5em; border-radius: 0.6em;
+    font-size: 1em; font-weight: bold; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    z-index: 20000; opacity: 0; transition: opacity .3s; pointer-events: none;
+}
+.toast-msg.ok  { background: #2e7d32; }
+.toast-msg.err { background: #c62828; }
+.toast-msg.show { opacity: 1; }
+
+/* ===================== レシートオーバーレイ ===================== */
+.receipt-overlay {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: #f0f4f0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.receipt-overlay.show { display: block; }
+.receipt-inner { max-width: 480px; margin: 0 auto; padding: 1em; }
+
+.rcpt-card {
+    background: #fff; border-radius: 0.6em;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    padding: 1.2em 1em 1em; margin-bottom: 1em; position: relative;
+}
+.rcpt-card::before {
+    content: ''; display: block; height: 14px;
+    background: radial-gradient(circle at 8px -4px, transparent 10px, #f0f4f0 11px) top left / 16px 14px repeat-x;
+    position: absolute; top: -12px; left: 0; right: 0;
+}
+.rcpt-card::after {
+    content: ''; display: block; height: 14px;
+    background: radial-gradient(circle at 8px 18px, transparent 10px, #f0f4f0 11px) bottom left / 16px 14px repeat-x;
+    position: absolute; bottom: -12px; left: 0; right: 0;
+}
+.rcpt-header { text-align: center; border-bottom: 1px dashed #ccc; padding-bottom: 0.6em; margin-bottom: 0.6em; }
+.rcpt-header .store { font-size: 1.1em; font-weight: bold; color: #004d40; }
+.rcpt-header .date  { font-size: 0.7em; color: #888; margin-top: 0.15em; }
+.rcpt-header .badge-ok {
+    display: block;
+    font-size: 1.1em; font-weight: bold; color: #222;
+    margin-top: 0.4em;
+}
+.rcpt-not-receipt {
+    font-size: 0.72em; color: #555;
+    margin-top: 0.1em;
+}
+.rcpt-bumon-section { margin-bottom: 0.8em; }
+.rcpt-bumon-title {
+    font-weight: bold; font-size: 0.85em; color: #fff;
+    padding: 0.25em 0.6em; border-radius: 0.3em;
+    margin-bottom: 0.3em; display: inline-block;
+}
+.rcpt-bumon-title[data-bumon="魚"]    { background: #1565c0; }
+.rcpt-bumon-title[data-bumon="天ぷら"] { background: #f9a825; color: #333; }
+.rcpt-bumon-title[data-bumon="惣菜"]   { background: #2e7d32; }
+.rcpt-bumon-title[data-bumon="唐揚"]   { background: #c62828; }
+.rcpt-items { width: 100%; border-collapse: collapse; font-size: 0.8em; margin-bottom: 0.3em; }
+.rcpt-items th { font-size: 0.75em; color: #888; font-weight: normal; padding: 0.15em 0.2em; border-bottom: 1px solid #eee; text-align: left; }
+.rcpt-items th:nth-child(n+2) { text-align: right; }
+.rcpt-items td { padding: 0.3em 0.2em; border-bottom: 1px solid #f5f5f5; vertical-align: top; }
+.rcpt-items td:nth-child(n+2) { text-align: right; white-space: nowrap; }
+.rcpt-items .nebiki-cell { color: #e53935; font-size: 0.9em; }
+.rcpt-bumon-subtotal {
+    display: flex; justify-content: space-between; align-items: center;
+    border-top: 1.5px solid #ccc; padding-top: 0.3em;
+    font-size: 0.85em; font-weight: bold; margin-bottom: 0.3em;
+}
+.rcpt-bumon-subtotal .amt { color: #c62828; font-size: 1.1em; }
+.rcpt-bumon-code { text-align: center; font-size: 0.7em; color: #666; margin-top: 0.2em; }
+.rcpt-bumon-code svg { display: block; margin: 0 auto; max-width: 260px; height: auto; }
+.rcpt-grand-total {
+    border-top: 2.5px solid #004d40; padding-top: 0.5em; margin-top: 0.3em;
+    display: flex; justify-content: space-between; align-items: baseline;
+}
+.rcpt-grand-total .label { font-size: 0.9em; font-weight: bold; color: #555; }
+.rcpt-grand-total .amount { font-size: 1.5em; font-weight: bold; color: #c62828; }
+.rcpt-grand-total .tax { font-size: 0.6em; color: #888; display: block; text-align: right; }
+.rcpt-footer-msg { text-align: center; margin-top: 0.6em; font-size: 0.65em; color: #aaa; border-top: 1px dashed #eee; padding-top: 0.4em; }
+.rcpt-corp { text-align: center; font-size: 0.6em; color: #888; margin-top: 0.5em; padding-top: 0.4em; border-top: 1px dashed #ddd; line-height: 1.6; }
+.rcpt-buttons { display: flex; gap: 0.6em; margin-top: 0.8em; }
+.rcpt-btn-print {
+    flex: 1; background: #1565c0; color: #fff; border: none;
+    border-radius: 0.5em; padding: 0.7em; font-size: 1em; font-weight: bold; cursor: pointer;
+}
+.rcpt-btn-print:hover { background: #0d47a1; }
+.rcpt-btn-next {
+    flex: 1; background: #004d40; color: #fff; border: none;
+    border-radius: 0.5em; padding: 0.7em; font-size: 1em; font-weight: bold; cursor: pointer;
+}
+.rcpt-btn-next:hover { background: #00695c; }
+
+@media print {
+    body > nav, .edit-wrap, .toast-msg, footer, .container, .rcpt-buttons { display: none !important; }
+    body { margin: 0; padding: 0; background: #fff; font-size: 11px; }
+    .receipt-overlay { display: block !important; position: static; background: #fff; overflow: visible; }
+    .receipt-inner { max-width: 72mm; margin: 0; padding: 0; }
+    .rcpt-card { box-shadow: none; border-radius: 0; padding: 2mm 1mm; }
+    .rcpt-card::before, .rcpt-card::after { display: none; }
+    .rcpt-bumon-title { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .rcpt-bumon-code svg { max-width: 58mm; }
+}
 </style>
+
+<!-- JsBarcode CDN -->
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<!-- StarWebPRNT 公式SDK -->
+<script src="JS/StarWebPrintBuilder.js"></script>
+<script src="JS/StarWebPrintTrader.js"></script>
+<!-- 印刷ヘルパー（PHP inline で提供 = JSファイル不要） -->
+<?php include __DIR__ . '/star_webprnt_inline.php'; ?>
+
+<!-- トースト -->
+<div class="toast-msg ok" id="toast-ok"></div>
+<div class="toast-msg err" id="toast-err"></div>
+
+<!-- レシートオーバーレイ -->
+<div class="receipt-overlay" id="receipt-overlay">
+  <div class="receipt-inner" id="receipt-inner"></div>
+</div>
 
 <div class="edit-wrap">
 
@@ -315,66 +480,66 @@ echo '</div>';
         <button class="aqty-btn" id="aqty-plus">＋</button>
       </div>
 
-      <div>
-        <div class="neb-tabs" id="add-neb-tabs">
-          <button class="neb-tab active" data-mode="ritsu">率</button>
-          <button class="neb-tab"        data-mode="gaku">額</button>
-        </div>
-        <div id="add-neb-ritsu">
-          <select id="add-sel-ritsu" class="neb-sel">
-            <option value="0">値引なし</option>
-            <?php foreach ($nebiki_ritsu_master as $r): ?>
-              <option value="<?= $r ?>"><?= $r ?>%</option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-        <div id="add-neb-gaku" style="display:none;">
-          <select id="add-sel-gaku" class="neb-sel">
-            <option value="0">値引なし</option>
-            <?php foreach ($nebiki_gaku_master as $g): ?>
-              <option value="<?= $g ?>">¥<?= $g ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-      </div>
+      <select id="add-sel-neb" class="ci-neb">
+        <option value="0">値引なし</option>
+        <?php foreach ($nebiki_ritsu_master as $r): ?>
+          <option value="r<?= $r ?>"><?= $r ?>%引</option>
+        <?php endforeach; ?>
+        <?php foreach ($nebiki_gaku_master as $g): ?>
+          <option value="g<?= $g ?>">¥<?= number_format($g) ?>引</option>
+        <?php endforeach; ?>
+      </select>
 
       <button class="btn-add-item" id="btn-add-item" disabled>＋ 追加</button>
     </div>
   </div>
 
-  <!-- 登録フォーム -->
-  <form method="post" id="edit-form">
-    <input type="hidden" name="cart_items" id="cart-json">
-    <input type="hidden" name="record_ids" value="<?= htmlspecialchars(json_encode($record_ids)) ?>">
-    <div class="action-row">
-      <a href="sales_list.php?date=<?= htmlspecialchars($date_raw) ?>" class="btn-cancel">
-        キャンセル
-      </a>
-      <button type="submit" class="btn-register" id="btn-register" disabled>
-        🔄 訂正登録する
-      </button>
-    </div>
-  </form>
+  <!-- アクションボタン -->
+  <div class="action-row">
+    <a href="sales_list.php?date=<?= htmlspecialchars($date_raw) ?>" class="btn-cancel">
+      キャンセル
+    </a>
+    <button type="button" class="btn-delete-all" id="btn-delete-all">
+      🗑 全体削除
+    </button>
+    <button type="button" class="btn-register" id="btn-register" disabled>
+      🔄 訂正登録する
+    </button>
+  </div>
 
 </div>
 
 <script>
 // 元データをカートの初期値として設定
 var cart = <?= json_encode($initial_cart, JSON_UNESCAPED_UNICODE) ?>;
-var addQty    = 1;
-var addNebMode = 'ritsu';
+var addQty = 1;
 
-// 値引きマスター
-var nebikiRitsuMaster = <?= json_encode($nebiki_ritsu_master) ?>;
-var nebikiGakuMaster  = <?= json_encode($nebiki_gaku_master)  ?>;
+// 値引き統合オプション（sales_entry.php と同じ形式）
+var nebikiOptions = [
+    {label:'値引なし', ritsu:0, gaku:0},
+    <?php foreach ($nebiki_ritsu_master as $r): ?>
+    {label:'<?= $r ?>%引', ritsu:<?= $r ?>, gaku:0},
+    <?php endforeach; ?>
+    <?php foreach ($nebiki_gaku_master as $g): ?>
+    {label:'¥<?= number_format($g) ?>引', ritsu:0, gaku:<?= $g ?>},
+    <?php endforeach; ?>
+];
+
+// 初期データに nebikiIdx を付与
+cart.forEach(function(item) {
+    item.nebikiIdx = 0;
+    for (var oi = 0; oi < nebikiOptions.length; oi++) {
+        var opt = nebikiOptions[oi];
+        if (opt.ritsu > 0 && opt.ritsu === item.nebiki_ritsu) { item.nebikiIdx = oi; break; }
+        if (opt.gaku  > 0 && opt.gaku  === item.nebiki_gaku)  { item.nebikiIdx = oi; break; }
+    }
+});
 
 // ---- 要素取得 ----
 var elCartBody  = document.getElementById('cart-tbody');
 var elCartTotal = document.getElementById('cart-total');
 var elCartEmp   = document.getElementById('cart-empty-msg');
-var elCartTbl   = document.getElementById('cart-table');
 var elRegBtn    = document.getElementById('btn-register');
-var elCartJson  = document.getElementById('cart-json');
 var elSelect    = document.getElementById('item-select');
 var elAddBtn    = document.getElementById('btn-add-item');
 var elAqtyNum   = document.getElementById('aqty-num');
@@ -386,35 +551,11 @@ function renderCart() {
     cart.forEach(function(item, i) {
         var tr = document.createElement('tr');
 
-        // 値引きオプション生成
-        var ritsuOpts = '<option value="0">なし</option>';
-        nebikiRitsuMaster.forEach(function(r) {
-            var sel = (item.nebiki_ritsu === r && item.nebiki_gaku === 0) ? ' selected' : '';
-            ritsuOpts += '<option value="' + r + '"' + sel + '>' + r + '%</option>';
+        // 統合値引きドロップダウン
+        var nebOpts = '';
+        nebikiOptions.forEach(function(opt, oi) {
+            nebOpts += '<option value="' + oi + '"' + (oi === item.nebikiIdx ? ' selected' : '') + '>' + esc(opt.label) + '</option>';
         });
-        var gakuOpts = '<option value="0">なし</option>';
-        nebikiGakuMaster.forEach(function(g) {
-            var sel = (item.nebiki_gaku === g) ? ' selected' : '';
-            gakuOpts += '<option value="' + g + '"' + sel + '>¥' + g + '</option>';
-        });
-
-        var nebikiHtml = '';
-        // 率タブ・額タブの現在状態判定
-        var hasGaku  = item.nebiki_gaku  > 0;
-        var hasRitsu = item.nebiki_ritsu > 0 && !hasGaku;
-        var showRitsu = !hasGaku;
-
-        nebikiHtml =
-            '<div style="display:flex;flex-direction:column;gap:2px;">' +
-            '<div style="display:flex;gap:3px;">' +
-            '<button type="button" class="neb-tab ' + (showRitsu ? 'active' : '') + '" onclick="switchNeb(' + i + ',\'ritsu\',this)">率</button>' +
-            '<button type="button" class="neb-tab ' + (!showRitsu ? 'active' : '') + '" onclick="switchNeb(' + i + ',\'gaku\',this)">額</button>' +
-            '</div>' +
-            '<div id="neb-ritsu-' + i + '" style="display:' + (showRitsu ? 'block':'none') + '">' +
-            '<select class="neb-sel" onchange="updateNebRitsu(' + i + ',this.value)">' + ritsuOpts + '</select></div>' +
-            '<div id="neb-gaku-' + i + '" style="display:' + (!showRitsu ? 'block':'none') + '">' +
-            '<select class="neb-sel" onchange="updateNebGaku(' + i + ',this.value)">' + gakuOpts + '</select></div>' +
-            '</div>';
 
         tr.innerHTML =
             '<td>' + esc(item.name) + '<br><small style="color:#888;">' + esc(item.tani) + '</small></td>' +
@@ -423,7 +564,7 @@ function renderCart() {
               '<span class="iqty-num">' + item.qty + '</span>' +
               '<button type="button" class="iqty-btn" onclick="changeQty(' + i + ',1)">＋</button>' +
             '</div></td>' +
-            '<td class="td-neb">' + nebikiHtml + '</td>' +
+            '<td class="td-neb"><select class="ci-neb" onchange="updateNeb(' + i + ',this.value)">' + nebOpts + '</select></td>' +
             '<td class="td-price">¥' + item.subtotal.toLocaleString() + '</td>' +
             '<td><button type="button" class="btn-del-row" onclick="delRow(' + i + ')">✕</button></td>';
 
@@ -438,12 +579,25 @@ function renderCart() {
     elRegBtn.disabled = !has;
 }
 
+// ---- 値引き変更（統合） ----
+function updateNeb(i, val) {
+    var ni  = parseInt(val, 10);
+    var opt = nebikiOptions[ni];
+    cart[i].nebikiIdx = ni;
+    if (opt.ritsu > 0) {
+        cart[i].nebiki_ritsu = opt.ritsu;
+        cart[i].nebiki_gaku  = Math.round(cart[i].price * opt.ritsu / 100);
+    } else {
+        cart[i].nebiki_ritsu = 0;
+        cart[i].nebiki_gaku  = opt.gaku;
+    }
+    recalc(i);
+}
+
 // ---- 小計再計算 ----
 function recalc(i) {
     var item = cart[i];
-    var nGaku = item.nebiki_gaku > 0 ? item.nebiki_gaku
-              : Math.round(item.price * item.nebiki_ritsu / 100);
-    var unit = Math.max(0, item.price - nGaku);
+    var unit = Math.max(0, item.price - item.nebiki_gaku);
     cart[i].subtotal = unit * item.qty;
     renderCart();
 }
@@ -456,24 +610,6 @@ function changeQty(i, d) {
 function delRow(i) {
     cart.splice(i, 1);
     renderCart();
-}
-function switchNeb(i, mode, btn) {
-    var isGaku = (mode === 'gaku');
-    document.getElementById('neb-ritsu-' + i).style.display = isGaku ? 'none' : 'block';
-    document.getElementById('neb-gaku-'  + i).style.display = isGaku ? 'block' : 'none';
-    if (isGaku) { cart[i].nebiki_ritsu = 0; }
-    else         { cart[i].nebiki_gaku  = 0; }
-    recalc(i);
-}
-function updateNebRitsu(i, v) {
-    cart[i].nebiki_ritsu = parseFloat(v) || 0;
-    cart[i].nebiki_gaku  = 0;
-    recalc(i);
-}
-function updateNebGaku(i, v) {
-    cart[i].nebiki_gaku  = parseInt(v, 10) || 0;
-    cart[i].nebiki_ritsu = 0;
-    recalc(i);
 }
 
 // ---- 新商品追加 ----
@@ -488,43 +624,240 @@ document.getElementById('aqty-plus').addEventListener('click', function() {
     addQty++;
     elAqtyNum.textContent = addQty;
 });
-document.getElementById('add-neb-tabs').addEventListener('click', function(e) {
-    var btn = e.target.closest('.neb-tab');
-    if (!btn) return;
-    addNebMode = btn.dataset.mode;
-    document.querySelectorAll('#add-neb-tabs .neb-tab').forEach(function(b) { b.classList.remove('active'); });
-    btn.classList.add('active');
-    document.getElementById('add-neb-ritsu').style.display = addNebMode === 'ritsu' ? '' : 'none';
-    document.getElementById('add-neb-gaku').style.display  = addNebMode === 'gaku'  ? '' : 'none';
-    if (addNebMode === 'ritsu') document.getElementById('add-sel-gaku').value  = 0;
-    else                        document.getElementById('add-sel-ritsu').value = 0;
-});
 elAddBtn.addEventListener('click', function() {
     var val = elSelect.value;
     if (!val) return;
-    var p  = JSON.parse(val);
-    var nr = addNebMode === 'ritsu' ? (parseFloat(document.getElementById('add-sel-ritsu').value) || 0) : 0;
-    var ng = addNebMode === 'gaku'  ? (parseInt(document.getElementById('add-sel-gaku').value, 10) || 0) : 0;
+    var p = JSON.parse(val);
+
+    // 統合ドロップダウンから値引きを取得
+    var nebVal = document.getElementById('add-sel-neb').value;
+    var nr = 0, ng = 0;
+    if (nebVal.charAt(0) === 'r') {
+        nr = parseFloat(nebVal.substring(1)) || 0;
+    } else if (nebVal.charAt(0) === 'g') {
+        ng = parseInt(nebVal.substring(1), 10) || 0;
+    }
     var nGaku = ng > 0 ? ng : Math.round(p.price * nr / 100);
     var unit  = Math.max(0, p.price - nGaku);
+
+    // nebikiIdx を特定
+    var nebikiIdx = 0;
+    for (var oi = 0; oi < nebikiOptions.length; oi++) {
+        if (nebikiOptions[oi].ritsu === nr && nebikiOptions[oi].gaku === ng) { nebikiIdx = oi; break; }
+    }
+
     cart.push({
         name: p.name, bumon: p.bumon, tani: p.tani, price: p.price,
         qty: addQty, nebiki_gaku: ng, nebiki_ritsu: nr,
-        subtotal: unit * addQty
+        nebikiIdx: nebikiIdx, subtotal: unit * addQty
     });
     renderCart();
     // リセット
     addQty = 1; elAqtyNum.textContent = 1;
-    document.getElementById('add-sel-ritsu').value = 0;
-    document.getElementById('add-sel-gaku').value  = 0;
+    document.getElementById('add-sel-neb').value = '0';
     elSelect.value = ''; elAddBtn.disabled = true;
 });
 
-// ---- フォーム送信 ----
-document.getElementById('edit-form').addEventListener('submit', function(e) {
-    if (!cart.length) { e.preventDefault(); return; }
-    elCartJson.value = JSON.stringify(cart);
+// ---- 要素（追加分） ----
+var elToastOk  = document.getElementById('toast-ok');
+var elToastErr = document.getElementById('toast-err');
+var elDelBtn   = document.getElementById('btn-delete-all');
+var RECORD_IDS = <?= json_encode($record_ids) ?>;
+var RECEIPT_NO = '<?= addslashes($receipt_no) ?>';
+var DATE_RAW   = '<?= addslashes($date_raw) ?>';
+var STORE_CD   = '<?= str_pad(substr($store_id, 0, 3), 3, "0", STR_PAD_LEFT) ?>';
+var DEPT_CODE  = {'魚':'01','天ぷら':'02','惣菜':'03','唐揚':'04'};
+
+// ---- トースト ----
+function showToast(el, msg) {
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function(){ el.classList.remove('show'); }, 3000);
+}
+
+// ---- JAN-13 チェックデジット ----
+function jan13CheckDigit(digits12) {
+    var sum = 0;
+    for (var i = 0; i < 12; i++) sum += parseInt(digits12[i],10) * (i%2===0?1:3);
+    return (10 - (sum%10)) % 10;
+}
+
+// ---- インストアコード生成: 20 + 店舗3桁 + 部門2桁 + 金額5桁 + CD1桁 = 13桁 ----
+function makeInstoreCode(bumon, amount) {
+    var dept = DEPT_CODE[bumon] || '99';
+    var amt  = Math.min(Math.max(0, Math.round(amount)), 99999);
+    var body = '20' + STORE_CD + dept + String(amt).padStart(5, '0');
+    return body + jan13CheckDigit(body);
+}
+
+// ---- 全体削除 ----
+elDelBtn.addEventListener('click', async function() {
+    if (!confirm('レシート No.' + RECEIPT_NO + ' を完全に削除しますか？\nこの操作は取り消せません。')) return;
+    elDelBtn.disabled = true;
+    elDelBtn.textContent = '削除中…';
+    try {
+        var res = await fetch('sales_edit.php?data=' + encodeURIComponent('<?= addslashes($raw) ?>'), {
+            method: 'POST',
+            headers: { 'Content-Type':'application/json', 'X-Requested-With':'XMLHttpRequest' },
+            body: JSON.stringify({ action:'delete_all', record_ids: RECORD_IDS, receipt_no: RECEIPT_NO })
+        });
+        var data = await res.json();
+        if (data.ok) {
+            showToast(elToastOk, '✓ レシート No.' + RECEIPT_NO + ' を削除しました');
+            setTimeout(function(){ location.href = 'sales_list.php?date=' + DATE_RAW; }, 1500);
+        } else {
+            showToast(elToastErr, '✕ ' + (data.error || '削除に失敗しました'));
+            elDelBtn.disabled = false;
+            elDelBtn.textContent = '🗑 全体削除';
+        }
+    } catch(err) {
+        showToast(elToastErr, '✕ 通信エラー: ' + err.message);
+        elDelBtn.disabled = false;
+        elDelBtn.textContent = '🗑 全体削除';
+    }
 });
+
+// ---- 訂正登録（AJAX） ----
+elRegBtn.addEventListener('click', async function() {
+    if (!cart.length) return;
+    elRegBtn.disabled = true;
+    elRegBtn.textContent = '送信中…';
+    try {
+        var res = await fetch('sales_edit.php?data=' + encodeURIComponent('<?= addslashes($raw) ?>'), {
+            method: 'POST',
+            headers: { 'Content-Type':'application/json', 'X-Requested-With':'XMLHttpRequest' },
+            body: JSON.stringify({ action:'update', cart_items: cart, record_ids: RECORD_IDS })
+        });
+        var data = await res.json();
+        if (data.ok) {
+            showReceipt(cart, data.receipt_no, data.total, data.count);
+        } else {
+            showToast(elToastErr, '✕ ' + (data.error || '訂正に失敗しました'));
+        }
+    } catch(err) {
+        showToast(elToastErr, '✕ 通信エラー: ' + err.message);
+    }
+    elRegBtn.textContent = '🔄 訂正登録する';
+    elRegBtn.disabled = cart.length === 0;
+});
+
+// ---- レシート表示 ----
+function showReceipt(items, receiptNo, grandTotal, count) {
+    var overlay = document.getElementById('receipt-overlay');
+    var inner   = document.getElementById('receipt-inner');
+
+    var groups = {};
+    var order  = [];
+    items.forEach(function(it) {
+        var b = it.bumon || 'その他';
+        if (!groups[b]) { groups[b] = []; order.push(b); }
+        groups[b].push(it);
+    });
+    var catOrder = ['魚','天ぷら','惣菜','唐揚'];
+    order.sort(function(a,b) {
+        var ia = catOrder.indexOf(a); if (ia<0) ia=99;
+        var ib = catOrder.indexOf(b); if (ib<0) ib=99;
+        return ia-ib;
+    });
+
+    var now = new Date();
+    var dateStr = now.getFullYear()+'年'+(now.getMonth()+1)+'月'+now.getDate()+'日 '
+                + String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+
+    var html = '<div class="rcpt-card">';
+    html += '<div class="rcpt-header">';
+    html += '<div class="store">🐟 <?= htmlspecialchars($store_name) ?></div>';
+    html += '<div class="date">' + esc(dateStr) + '　No.' + esc(receiptNo) + '（訂正）</div>';
+    html += '<div class="badge-ok">明細書</div>';
+    html += '<div class="rcpt-not-receipt">領収書ではありません</div>';
+    html += '</div>';
+
+    order.forEach(function(bumon) {
+        var bItems = groups[bumon];
+        var bSubtotal = bItems.reduce(function(s,it){ return s+it.subtotal; },0);
+        var code = makeInstoreCode(bumon, bSubtotal);
+
+        html += '<div class="rcpt-bumon-section">';
+        html += '<div class="rcpt-bumon-title" data-bumon="'+esc(bumon)+'">'+esc(bumon)+'</div>';
+        html += '<table class="rcpt-items"><thead><tr><th>商品名</th><th>単価</th><th>数量</th><th>値引額</th><th>値引詳細</th><th>請求小計</th></tr></thead><tbody>';
+        bItems.forEach(function(it) {
+            var nebDetail = '-';
+            var nebAmt = 0;
+            if (it.nebiki_ritsu>0) {
+                nebDetail = it.nebiki_ritsu+'%引';
+                nebAmt = it.nebiki_gaku || Math.round(it.price*it.nebiki_ritsu/100);
+            } else if (it.nebiki_gaku>0) {
+                nebDetail = '¥'+it.nebiki_gaku.toLocaleString()+'引';
+                nebAmt = it.nebiki_gaku;
+            }
+            html += '<tr><td>'+esc(it.name)+'</td><td>¥'+it.price.toLocaleString()+'</td><td>'+it.qty+'</td>';
+            html += '<td class="nebiki-cell">'+(nebAmt>0?'¥'+nebAmt.toLocaleString():'-')+'</td>';
+            html += '<td class="nebiki-cell">'+nebDetail+'</td><td>¥'+it.subtotal.toLocaleString()+'</td></tr>';
+        });
+        html += '</tbody></table>';
+        html += '<div class="rcpt-bumon-subtotal"><span>'+esc(bumon)+' 小計</span><span class="amt">¥'+bSubtotal.toLocaleString()+'</span></div>';
+        html += '<div class="rcpt-bumon-code"><svg id="bc-'+esc(bumon)+'"></svg><span>'+code+'</span></div>';
+        html += '</div>';
+    });
+
+    html += '<div class="rcpt-grand-total"><span class="label">合　計</span><div>';
+    html += '<span class="amount">¥'+grandTotal.toLocaleString()+'</span>';
+    html += '<span class="tax">（税込）</span></div></div>';
+    html += '<div class="rcpt-footer-msg">ありがとうございました</div>';
+    html += '<div class="rcpt-corp">';
+    html += '<div style="font-weight:bold;">株式会社富惣</div>';
+    html += '<div>大阪府堺市堺区遠里小野町３丁４番１号</div>';
+    html += '<div>TEL 072-229-8800 / FAX 072-229-4700</div>';
+    html += '<div>お問い合せ窓口 0120-014-868</div>';
+    html += '</div></div>';
+
+    /* StarWebPRNT 用にレシートデータをセット */
+    var _barCodes = {};
+    order.forEach(function(bumon) {
+        var bItems = groups[bumon];
+        var bSub   = bItems.reduce(function(s,it){ return s + it.subtotal; }, 0);
+        _barCodes[bumon] = makeInstoreCode(bumon, bSub);
+    });
+    _starReceiptData = {
+        storeName : '<?= htmlspecialchars($store_name, ENT_QUOTES) ?>',
+        dateStr   : dateStr,
+        receiptNo : String(receiptNo),
+        groups    : groups,
+        catOrder  : order,
+        grandTotal: grandTotal,
+        isKakunin : true,
+        barCodes  : _barCodes,
+        count     : count
+    };
+
+    html += '<div class="rcpt-buttons">';
+    html += '<button class="rcpt-btn-print" id="rcpt-print-btn">🖨 印刷</button>';
+    html += '<button class="rcpt-btn-next" id="rcpt-close">売上一覧へ →</button>';
+    html += '</div>';
+
+    inner.innerHTML = html;
+    overlay.classList.add('show');
+
+    order.forEach(function(bumon) {
+        var bItems = groups[bumon];
+        var bSubtotal = bItems.reduce(function(s,it){ return s+it.subtotal; },0);
+        var code = makeInstoreCode(bumon, bSubtotal);
+        try {
+            JsBarcode('#bc-'+CSS.escape(bumon), code, {
+                format:'EAN13', width:2, height:50, displayValue:false, margin:4
+            });
+        } catch(e) { console.warn('Barcode error:', e); }
+    });
+
+    /* 印刷ボタン */
+    document.getElementById('rcpt-print-btn').addEventListener('click', function() {
+        starPrintReceipt(this);
+    });
+
+    document.getElementById('rcpt-close').addEventListener('click', function() {
+        location.href = 'sales_list.php?date=' + DATE_RAW + '&edited=' + RECEIPT_NO;
+    });
+}
 
 function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

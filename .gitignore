@@ -1,5 +1,38 @@
+# ============================================================
+# ととレジ .gitignore
+# ============================================================
+
+# --- 機密情報（絶対にコミットしない）---
 fm_config_secret.php
-fm_config_secret.php
-config.php
+.env
+*.env
+
+# --- デバッグ・開発用（本番コードではない）---
+debug_fm_layout.php
+sales_entry_debug.php
+sales_list_debug.php
+sales_entry_1.php
+product_debug.php
+star_debug_log.php
+
+# --- サーバーサイド生成ファイル ---
+sales_queue_data/
+*.log
+
+# --- アップロード不要ドキュメント ---
+サーバにアップしない資料/
+
+# --- OS / エディタ ---
 .DS_Store
-__MACOSX
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# --- PHP ---
+vendor/
+composer.lock
+
+# アップ不要ドキュメント（日本語ディレクトリ）
+サーバにアップしない資料/

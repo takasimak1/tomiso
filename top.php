@@ -5,6 +5,7 @@
 use fmRESTor\fmRESTor;
 session_start();
 if (!isset($_SESSION['user'])) { header('Location: login.php'); exit(); }
+if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
 
@@ -190,6 +191,18 @@ include __DIR__ . '/header.php';
     <a href="sales_list.php" class="nav-btn">
       <span class="nav-icon">≡</span>
       売上一覧
+    </a>
+    <a href="daily_report_entry.php" class="nav-btn">
+      <span class="nav-icon">📋</span>
+      売上日報入力
+    </a>
+    <a href="daily_report_mystore.php" class="nav-btn">
+      <span class="nav-icon">📈</span>
+      自店舗成績
+    </a>
+    <a href="shohin_maint.php" class="nav-btn">
+      <span class="nav-icon">📦</span>
+      商品メンテ
     </a>
   </div>
 

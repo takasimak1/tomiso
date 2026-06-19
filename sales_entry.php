@@ -9,12 +9,74 @@
 use fmRESTor\fmRESTor;
 session_start();
 if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
+if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/instore_codes.php';
 
 $store_id   = $_SESSION['store_id'];
 $store_name = $_SESSION['store_name'];
 $today      = date('m/d/Y');
+
+// =====================================================================
+// インストアコード 店舗別設定
+// 優先順位: ① FM アカウントマスタ（account_API）→ ② instore_codes.php（暫定）
+// FM に「インストアコード_*」フィールドが設定されたら①が自動的に有効になる
+//
+// フォーマット: 店舗部門コード(7桁) + 金額(5桁) + CD(1桁) = 13桁
+// 7桁コードの例: 魚=2004355, 天ぷら=2004354 など
+// フィールド型: テキスト（バーコード生成で文字列連結するため）
+// =====================================================================
+
+/** FM account_API からインストアコード7桁を取得 */
+function _fetch_instore_codes_from_fm(string $store_id, string $host, string $db,
+                                       string $layout_account,
+                                       string $api_master_user, string $api_master_pass): array {
+    // 部門名 → FM フィールド名 の対応
+    $dept_fields = [
+        '魚'     => 'インストアコード_魚',
+        '天ぷら' => 'インストアコード_天ぷら',
+        '惣菜'   => 'インストアコード_惣菜',
+        'イカ焼' => 'インストアコード_イカ焼',
+        '唐揚'   => 'インストアコード_唐揚',
+        'レジ袋' => 'インストアコード_レジ袋',
+    ];
+    try {
+        $fm = new \fmRESTor\fmRESTor($host, $db, $layout_account,
+                                      $api_master_user, $api_master_pass,
+                                      ['allowInsecure' => true]);
+        $res = $fm->findRecord([['店舗Ｎｏ' => $store_id]]);
+        $fd  = $res['result']['response']['data'][0]['fieldData'] ?? [];
+        $codes = [];
+        foreach ($dept_fields as $cat => $field) {
+            $v = trim((string)($fd[$field] ?? ''));
+            if ($v !== '') $codes[$cat] = $v;
+        }
+        return $codes;
+    } catch (\Throwable $e) {
+        return [];   // FM 取得失敗時は空配列 → フォールバックへ
+    }
+}
+
+// FM から取得（フィールド未設定店舗は空配列が返る）
+$ic_dept_fm = _fetch_instore_codes_from_fm(
+    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass
+);
+
+// フォールバック: instore_codes.php の静的設定（FM 移行完了後は削除可）
+$_ic_static = $instore_config[$store_id] ?? [];
+$_ic_static_dept = $_ic_static['dept'] ?? [];
+// 静的設定は旧フォーマット(3桁)なので7桁に変換して利用
+// ※ FM 設定が揃い次第このブロックは不要になる
+if (empty($ic_dept_fm) && !empty($_ic_static_dept)) {
+    $pfx = $_ic_static['prefix'] ?? '00';
+    $ic_dept = [];
+    foreach ($_ic_static_dept as $cat => $code3) {
+        $ic_dept[$cat] = '20' . $pfx . $code3;   // 2 + 2 + 3 = 7桁
+    }
+} else {
+    $ic_dept = $ic_dept_fm;   // FM 設定を優先
+}
 
 $nebiki_ritsu_master = [10, 20, 30, 50];
 $nebiki_gaku_master  = [50, 100, 200, 300];
@@ -108,7 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// --- カテゴリーマッピング（難波店ヒアリング: 4カテゴリーに集約） ---
+// --- カテゴリーマッピング（FM 部門名 → 表示カテゴリー名） ---
 // キー = FileMaker 部門名 → 値 = 表示カテゴリー名
 $category_map = [
     '焼魚'    => '魚',
@@ -117,39 +179,49 @@ $category_map = [
     '弁当'    => '惣菜',
     '冷惣菜'  => '惣菜',
     '真空商品' => '惣菜',
-    'いか焼き' => '惣菜',
-    'いか焼'  => '惣菜',
+    'いか焼き' => 'イカ焼',
+    'いか焼'  => 'イカ焼',
     '南蛮漬'  => '惣菜',
     '唐揚'    => '唐揚',
 ];
 // 表示順（この順番でタブを並べる）
-$category_order = ['魚', '天ぷら', '惣菜', '唐揚'];
+$category_order = ['魚', '天ぷら', '惣菜', 'イカ焼', '唐揚'];
 
 $fm2  = new fmRESTor($host, $db, $layout_hanbai, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
-$res2 = $fm2->getRecords(['_limit' => 500]);
+// 全件取得 → PHP で自店舗・発売中 を絞り込む（shohin_maint.php と同方式）
+$res2 = $fm2->getRecords(['_limit' => 1000]);
 $products   = [];
 $bumon_list = [];
 foreach ($res2['result']['response']['data'] ?? [] as $row) {
     $f = $row['fieldData'];
-    $b = trim($f['部門']     ?? '');
     $n = trim($f['商品名']   ?? '');
-    $y = trim($f['よみがな'] ?? '');
-    $t = trim($f['取扱店舗'] ?? '');
     if ($n === '') continue;
 
-    // 取扱店舗で絞り込み（空欄=全店舗対象、値あり=該当店舗のみ）
-    if ($t !== '' && $t !== $store_id) continue;
+    // ① 発売中=1 のみ
+    if ((int)($f['発売中'] ?? 0) !== 1) continue;
 
-    // 部門名をカテゴリーにマッピング（未定義の部門はそのまま表示）
+    // ② 自店舗が取扱店舗に含まれているか
+    $positions = getStorePositions($f);
+    if (!in_array($store_id, $positions, true)) continue;
+
+    $b = trim($f['部門']     ?? '');
+    $y = trim($f['よみがな'] ?? '');
+
+    // 部門名をカテゴリーにマッピング
     $cat = $category_map[$b] ?? $b;
 
+    // 店舗のセール価格（未設定=0の場合は本体価格を使用）
+    $sale_price = getStoreSalePrice($f, $store_id);
+    $disp_price = ($sale_price > 0) ? $sale_price : (int)($f['本体価格'] ?? 0);
+
     $products[] = [
-        'bumon'  => $cat,
+        'bumon'      => $cat,
         'bumon_orig' => $b,
-        'name'   => $n,
-        'yomi'   => $y,
-        'tani'   => trim($f['販売単位'] ?? ''),
-        'price'  => (int)($f['本体価格'] ?? 0),
+        'name'       => $n,
+        'yomi'       => $y,
+        'tani'       => trim($f['販売単位'] ?? ''),
+        'price'      => $disp_price,
+        'sale'       => (int)($f['セール']  ?? 0),
     ];
 }
 
@@ -192,7 +264,7 @@ body { overflow: hidden; margin: 0; padding: 0; }
     display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr auto;  /* タブ → 商品 → カート */
-    height: calc(100vh - 48px);
+    height: calc(100dvh - 48px);        /* dvh: ブラウザナビバーを考慮した実際の高さ */
     overflow: hidden;
     margin-top: 0 !important;
 }
@@ -268,6 +340,12 @@ body { overflow: hidden; margin: 0; padding: 0; }
 .shohin-item.flash  { transform: scale(0.92); filter: brightness(0.8); }
 .shohin-item .s-name { font-weight: bold; font-size: 0.95em; }
 .shohin-item .s-price { font-weight: bold; color: #c62828; font-size: 0.85em; margin-top: 0.1em; }
+.shohin-item .s-sale {
+    display: inline-block; background: #c62828; color: #fff;
+    font-size: 0.68em; font-weight: bold; padding: 1px 5px;
+    border-radius: 0.3em; margin-left: 0.3em; vertical-align: middle;
+    letter-spacing: 0.03em;
+}
 .shohin-item .s-tani { display: none !important; }
 .shohin-item .s-sub  { display: none !important; }
 /* カテゴリー別カラー */
@@ -361,19 +439,50 @@ body { overflow: hidden; margin: 0; padding: 0; }
 }
 .ci-del {
     border: none;
+    background: #e53935;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.78em;
+    font-weight: bold;
+    padding: 0.3em 0.55em;
+    border-radius: 0.3em;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: 2.2em;
+    transition: background .1s;
+    line-height: 1.2;
+}
+.ci-del:hover, .ci-del:active { background: #b71c1c; }
+/* 削除アニメーション */
+.ci-row.removing {
+    animation: rowRemove .25s ease-out forwards;
+}
+@keyframes rowRemove {
+    0%   { background: #ffebee; opacity: 1; }
+    100% { background: #ffebee; opacity: 0; max-height: 0; padding: 0; }
+}
+/* 全消去ボタン */
+.clear-cart-btn {
+    border: none;
     background: none;
     color: #e53935;
+    font-size: 0.78em;
+    font-weight: bold;
     cursor: pointer;
-    font-size: 1.1em;
-    padding: 0 0.15em;
-    line-height: 1;
+    padding: 0.2em 0.5em;
+    border-radius: 0.3em;
+    border: 1.5px solid #e53935;
+    white-space: nowrap;
+    transition: all .1s;
 }
+.clear-cart-btn:hover { background: #e53935; color: #fff; }
 /* カートフッター */
 .cart-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0.4em 0.6em;
+    padding-bottom: calc(0.4em + env(safe-area-inset-bottom, 0px));  /* iOS セーフエリア対応 */
     border-top: 1px solid #e0e0e0;
     background: #f8f8f8;
 }
@@ -428,11 +537,277 @@ body { overflow: hidden; margin: 0; padding: 0; }
     pointer-events: none;
 }
 .toast-err.show { opacity: 1; }
+
+/* ===================== レシートオーバーレイ ===================== */
+.receipt-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: #f0f4f0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.receipt-overlay.show { display: block; }
+.receipt-inner {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 1em;
+}
+
+/* レシートカード */
+.rcpt-card {
+    background: #fff;
+    border-radius: 0.6em;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    padding: 1.2em 1em 1em;
+    margin-bottom: 1em;
+    position: relative;
+}
+.rcpt-card::before {
+    content: '';
+    display: block;
+    height: 14px;
+    background: radial-gradient(circle at 8px -4px, transparent 10px, #f0f4f0 11px) top left / 16px 14px repeat-x;
+    position: absolute;
+    top: -12px; left: 0; right: 0;
+}
+.rcpt-card::after {
+    content: '';
+    display: block;
+    height: 14px;
+    background: radial-gradient(circle at 8px 18px, transparent 10px, #f0f4f0 11px) bottom left / 16px 14px repeat-x;
+    position: absolute;
+    bottom: -12px; left: 0; right: 0;
+}
+.rcpt-header {
+    text-align: center;
+    border-bottom: 1px dashed #ccc;
+    padding-bottom: 0.6em;
+    margin-bottom: 0.6em;
+}
+.rcpt-header .store { font-size: 1.1em; font-weight: bold; color: #004d40; }
+.rcpt-header .date  { font-size: 0.7em; color: #888; margin-top: 0.15em; }
+.rcpt-header .badge-ok {
+    display: block;
+    font-size: 1.1em; font-weight: bold; color: #222;
+    margin-top: 0.4em;
+}
+.rcpt-not-receipt {
+    font-size: 0.72em; color: #555;
+    margin-top: 0.1em;
+}
+
+/* 部門セクション */
+.rcpt-bumon-section { margin-bottom: 0.8em; }
+.rcpt-bumon-title {
+    font-weight: bold; font-size: 0.85em;
+    color: #fff; padding: 0.25em 0.6em;
+    border-radius: 0.3em; margin-bottom: 0.3em;
+    display: inline-block;
+}
+.rcpt-bumon-title[data-bumon="魚"]    { background: #1565c0; }
+.rcpt-bumon-title[data-bumon="天ぷら"] { background: #f9a825; color: #333; }
+.rcpt-bumon-title[data-bumon="惣菜"]   { background: #2e7d32; }
+.rcpt-bumon-title[data-bumon="唐揚"]   { background: #c62828; }
+
+.rcpt-items {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8em;
+    margin-bottom: 0.3em;
+}
+.rcpt-items th {
+    font-size: 0.75em; color: #888; font-weight: normal;
+    padding: 0.15em 0.2em; border-bottom: 1px solid #eee; text-align: left;
+}
+.rcpt-items th:nth-child(n+2) { text-align: right; }
+.rcpt-items td {
+    padding: 0.3em 0.2em;
+    border-bottom: 1px solid #f5f5f5;
+    vertical-align: top;
+}
+.rcpt-items td:nth-child(n+2) { text-align: right; white-space: nowrap; }
+.rcpt-items .nebiki-cell { color: #e53935; font-size: 0.9em; }
+
+.rcpt-bumon-subtotal {
+    display: flex; justify-content: space-between; align-items: center;
+    border-top: 1.5px solid #ccc; padding-top: 0.3em;
+    font-size: 0.85em; font-weight: bold; margin-bottom: 0.3em;
+}
+.rcpt-bumon-subtotal .amt { color: #c62828; font-size: 1.1em; }
+.rcpt-bumon-code {
+    text-align: center; font-size: 0.7em; color: #666;
+    margin-top: 0.2em;
+}
+.rcpt-bumon-code svg { display: block; margin: 0 auto; max-width: 260px; height: auto; }
+
+/* 合計 */
+.rcpt-grand-total {
+    border-top: 2.5px solid #004d40;
+    padding-top: 0.5em; margin-top: 0.3em;
+    display: flex; justify-content: space-between; align-items: baseline;
+}
+.rcpt-grand-total .label { font-size: 0.9em; font-weight: bold; color: #555; }
+.rcpt-grand-total .amount { font-size: 1.5em; font-weight: bold; color: #c62828; }
+.rcpt-grand-total .tax { font-size: 0.6em; color: #888; display: block; text-align: right; }
+
+.rcpt-footer-msg {
+    text-align: center; margin-top: 0.6em;
+    font-size: 0.65em; color: #aaa;
+    border-top: 1px dashed #eee; padding-top: 0.4em;
+}
+.rcpt-corp {
+    text-align: center; font-size: 0.6em; color: #888;
+    margin-top: 0.5em; padding-top: 0.4em;
+    border-top: 1px dashed #ddd; line-height: 1.6;
+}
+
+/* ボタンエリア */
+.rcpt-buttons {
+    display: flex; gap: 0.6em; margin-top: 0.8em;
+}
+.rcpt-btn-print {
+    flex: 1; background: #1565c0; color: #fff; border: none;
+    border-radius: 0.5em; padding: 0.7em; font-size: 1em;
+    font-weight: bold; cursor: pointer;
+}
+.rcpt-btn-print:hover { background: #0d47a1; }
+.rcpt-btn-next {
+    flex: 1; background: #004d40; color: #fff; border: none;
+    border-radius: 0.5em; padding: 0.7em; font-size: 1em;
+    font-weight: bold; cursor: pointer;
+}
+.rcpt-btn-next:hover { background: #00695c; }
+
+/* ===================== タブレット向け最適化（768px以上） ===================== */
+/* スマホでは使用しない想定。縦1列・カート下固定レイアウトを維持しつつ拡大。 */
+@media (min-width: 768px) {
+
+    /* 商品グリッド：4列に */
+    .pos-shohin {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    /* カートエリアを広く（50vh） */
+    .pos-cart {
+        max-height: 52vh;
+    }
+
+    /* 商品ボタンを大きく */
+    .shohin-item {
+        min-height: 4.2em;
+        padding: 0.55em 0.3em;
+        font-size: 1em;
+    }
+    .shohin-item .s-name  { font-size: 1.0em; }
+    .shohin-item .s-price { font-size: 0.92em; }
+
+    /* カート各行：1行目に商品名、2行目にボタン群 */
+    .ci-row {
+        flex-wrap: wrap;
+        padding: 0.55em 0;
+        gap: 0.45em;
+    }
+    /* 商品名：1行目・最大2行表示 */
+    .ci-name {
+        flex: none;
+        width: 100%;
+        white-space: normal;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        font-size: 1.05em;
+        line-height: 1.35;
+    }
+    /* ＋/－ ボタン */
+    .ci-qty-btn {
+        width: 2.9em;
+        height: 2.9em;
+        font-size: 1.15em;
+    }
+    .ci-qty-num {
+        font-size: 1.2em;
+        min-width: 2em;
+    }
+    /* 値引セレクト */
+    .ci-neb {
+        font-size: 1em;
+        padding: 0.3em 0.5em;
+        height: 2.9em;
+        min-width: 5.8em;
+    }
+    /* 小計 */
+    .ci-subtotal {
+        font-size: 1.08em;
+        min-width: 4.5em;
+    }
+    /* 削除ボタン */
+    .ci-del {
+        font-size: 0.9em;
+        padding: 0.55em 1.0em;
+        min-height: 2.9em;
+    }
+    /* 全消去ボタン */
+    .clear-cart-btn {
+        font-size: 0.9em;
+        padding: 0.35em 0.7em;
+    }
+    /* 合計金額 */
+    .cart-total-amount {
+        font-size: 1.7em;
+    }
+    /* 登録ボタン */
+    .register-btn {
+        font-size: 1.15em;
+        padding: 0.65em 1.8em;
+    }
+}
+
+/* カートパネルヘッダーは非表示（縦1列レイアウトでは不要） */
+.cart-panel-header { display: none; }
+
+/* ===================== 印刷用 CSS ===================== */
+@media print {
+    /* POS画面・ナビ・フッター非表示 */
+    body > nav, .pos-wrap, .toast-ok, .toast-err,
+    footer, .container, .rcpt-buttons { display: none !important; }
+
+    body { margin: 0; padding: 0; background: #fff; font-size: 11px; }
+    .receipt-overlay {
+        display: block !important;
+        position: static;
+        background: #fff;
+        overflow: visible;
+    }
+    .receipt-inner { max-width: 72mm; margin: 0; padding: 0; }
+    .rcpt-card {
+        box-shadow: none; border-radius: 0; padding: 2mm 1mm;
+    }
+    .rcpt-card::before, .rcpt-card::after { display: none; }
+    .rcpt-bumon-title { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .rcpt-bumon-code svg { max-width: 58mm; }
+    .rcpt-grand-total .amount { font-size: 1.3em; }
+}
 </style>
+
+<!-- JsBarcode CDN -->
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<!-- StarWebPRNT 公式SDK -->
+<script src="JS/StarWebPrintBuilder.js"></script>
+<script src="JS/StarWebPrintTrader.js"></script>
+<!-- 印刷ヘルパー（PHP inline で提供 = JSファイル不要） -->
+<?php include __DIR__ . '/star_webprnt_inline.php'; ?>
 
 <!-- トースト -->
 <div class="toast-ok" id="toast-ok"></div>
 <div class="toast-err" id="toast-err"></div>
+
+<!-- レシートオーバーレイ -->
+<div class="receipt-overlay" id="receipt-overlay">
+  <div class="receipt-inner" id="receipt-inner"></div>
+</div>
 
 <div class="pos-wrap">
 
@@ -454,14 +829,22 @@ body { overflow: hidden; margin: 0; padding: 0; }
               data-name="<?= htmlspecialchars($p['name'],  ENT_QUOTES) ?>"
               data-tani="<?= htmlspecialchars($p['tani'],  ENT_QUOTES) ?>"
               data-price="<?= $p['price'] ?>">
-        <span class="s-name"><?= htmlspecialchars($p['name']) ?></span>
+        <span class="s-name">
+          <?= htmlspecialchars($p['name']) ?>
+          <?php if ($p['sale']): ?><span class="s-sale">セール</span><?php endif; ?>
+        </span>
         <span class="s-price">¥<?= number_format($p['price']) ?></span>
       </button>
     <?php endforeach; ?>
   </div>
 
-  <!-- 3. カート（画面下部） -->
+  <!-- 3. カート（スマホ：画面下部 / タブレット：右パネル） -->
   <div class="pos-cart" id="pos-cart">
+    <!-- タブレット時のみ表示されるカートヘッダー -->
+    <div class="cart-panel-header">
+      <span>🛒 カート</span>
+      <span id="cart-item-count" style="font-size:0.85em;opacity:.8;"></span>
+    </div>
     <div class="cart-items" id="cart-items">
       <div class="cart-empty" id="cart-empty">商品をタップして追加</div>
     </div>
@@ -469,6 +852,7 @@ body { overflow: hidden; margin: 0; padding: 0; }
       <div>
         <span class="cart-total-label">合計</span>
         <span class="cart-total-amount" id="cart-total">¥0</span>
+        <button type="button" class="clear-cart-btn" id="clear-cart-btn" style="display:none;margin-left:.5em;">🗑 全消去</button>
       </div>
       <button class="register-btn" id="reg-btn" disabled>登録する</button>
     </div>
@@ -495,12 +879,13 @@ const nebikiOptions = [
 let cart = [];  // {name,bumon,tani,price,qty,nebikiIdx,nebiki_gaku,nebiki_ritsu,subtotal}
 
 const $  = id => document.getElementById(id);
-const elCartItems = $('cart-items');
-const elCartEmpty = $('cart-empty');
-const elCartTotal = $('cart-total');
-const elRegBtn    = $('reg-btn');
-const elToastOk   = $('toast-ok');
-const elToastErr  = $('toast-err');
+const elCartItems    = $('cart-items');
+const elCartEmpty    = $('cart-empty');
+const elCartTotal    = $('cart-total');
+const elRegBtn       = $('reg-btn');
+const elClearCartBtn = $('clear-cart-btn');
+const elToastOk      = $('toast-ok');
+const elToastErr     = $('toast-err');
 
 /* ===================== カテゴリータブ ===================== */
 $('bumon-area').addEventListener('click', function(e) {
@@ -573,7 +958,7 @@ function renderCart() {
             '</div>' +
             '<select class="ci-neb">' + nebOpts + '</select>' +
             '<span class="ci-subtotal">¥' + item.subtotal.toLocaleString() + '</span>' +
-            '<button type="button" class="ci-del">✕</button>';
+            '<button type="button" class="ci-del">🗑 削除</button>';
 
         elCartItems.appendChild(row);
     });
@@ -582,6 +967,11 @@ function renderCart() {
     const total = cart.reduce((s, it) => s + it.subtotal, 0);
     elCartTotal.textContent = '¥' + total.toLocaleString();
     elRegBtn.disabled = cart.length === 0;
+    /* 全消去ボタン表示制御 */
+    elClearCartBtn.style.display = cart.length > 0 ? '' : 'none';
+    /* タブレット用カートヘッダーの件数表示 */
+    const countEl = document.getElementById('cart-item-count');
+    if (countEl) countEl.textContent = cart.length > 0 ? cart.length + '点' : '';
 }
 
 /* ===================== カート内操作（イベント委譲） ===================== */
@@ -601,9 +991,21 @@ elCartItems.addEventListener('click', function(e) {
         recalcItem(item);
         renderCart();
     } else if (e.target.closest('.ci-del')) {
-        cart.splice(idx, 1);
-        renderCart();
+        /* 削除アニメーション付き */
+        row.classList.add('removing');
+        setTimeout(() => {
+            cart.splice(idx, 1);
+            renderCart();
+        }, 200);
     }
+});
+
+/* 全消去ボタン */
+elClearCartBtn.addEventListener('click', function() {
+    if (cart.length === 0) return;
+    if (!confirm('カートの商品をすべて削除しますか？')) return;
+    cart = [];
+    renderCart();
 });
 
 /* 値引セレクト変更 */
@@ -654,7 +1056,7 @@ elRegBtn.addEventListener('click', async function() {
         const data = await res.json();
 
         if (data.ok) {
-            showToast(elToastOk, '✓ 登録完了　' + data.count + '点　¥' + data.total.toLocaleString());
+            showReceipt(cart, data.receipt_no, data.total, data.count);
             cart = [];
             renderCart();
         } else {
@@ -679,6 +1081,192 @@ function showToast(el, msg) {
 /* ユーティリティ */
 function esc(s) {
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ===================== インストアコード（JAN-13） ===================== */
+/* フォーマット: 店舗部門コード(7桁) + 金額(5桁) + CD(1桁) = 13桁          */
+/* 7桁コードは FM 店舗マスタで店舗ごとに管理（tenpo_API → PHP → ここに注入） */
+const INSTORE_CODES = <?= json_encode($ic_dept, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?>;
+
+/** JAN-13 チェックデジット計算（12桁ボディ → チェックデジット1桁） */
+function jan13CheckDigit(digits12) {
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+        sum += parseInt(digits12[i], 10) * (i % 2 === 0 ? 1 : 3);
+    }
+    return (10 - (sum % 10)) % 10;
+}
+
+/**
+ * インストアコード生成
+ *   INSTORE_CODES[部門名] = 7桁店舗部門コード（例: '2004355'）
+ *   body = 7桁 + 金額5桁 = 12桁 → + CD1桁 = 13桁
+ *   未設定部門は null を返す（バーコード非表示）
+ */
+function makeInstoreCode(bumon, amount) {
+    const prefix7 = INSTORE_CODES[bumon] || '';
+    if (!prefix7) return null;                       // 未設定 → バーコードなし
+    const amt  = Math.min(Math.max(0, Math.round(amount)), 99999);
+    const body = prefix7 + String(amt).padStart(5, '0');   // 7 + 5 = 12桁
+    return body + jan13CheckDigit(body);                    // + CD = 13桁
+}
+
+/* ===================== レシート表示 ===================== */
+function showReceipt(items, receiptNo, grandTotal, count) {
+    const overlay = document.getElementById('receipt-overlay');
+    const inner   = document.getElementById('receipt-inner');
+
+    /* 部門別にグループ化 */
+    const groups = {};
+    const order  = [];
+    items.forEach(function(it) {
+        const b = it.bumon || 'その他';
+        if (!groups[b]) { groups[b] = []; order.push(b); }
+        groups[b].push(it);
+    });
+
+    /* 表示順をカテゴリー順に並べ替え */
+    const catOrder = ['魚','天ぷら','惣菜','唐揚'];
+    order.sort(function(a,b) {
+        var ia = catOrder.indexOf(a); if (ia < 0) ia = 99;
+        var ib = catOrder.indexOf(b); if (ib < 0) ib = 99;
+        return ia - ib;
+    });
+
+    /* 現在日時 */
+    var now = new Date();
+    var dateStr = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 '
+                + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+
+    var html = '';
+    html += '<div class="rcpt-card">';
+    html += '<div class="rcpt-header">';
+    html += '<div class="store">🐟 <?= htmlspecialchars($store_name) ?></div>';
+    html += '<div class="date">' + esc(dateStr) + '　No.' + esc(receiptNo) + '</div>';
+    html += '<div class="badge-ok">明細書</div>';
+    html += '<div class="rcpt-not-receipt">領収書ではありません</div>';
+    html += '</div>';
+
+    /* 部門ごとのセクション */
+    order.forEach(function(bumon) {
+        var bItems = groups[bumon];
+        var bSubtotal = bItems.reduce(function(s,it){ return s + it.subtotal; }, 0);
+        var code = makeInstoreCode(bumon, bSubtotal);
+
+        html += '<div class="rcpt-bumon-section">';
+        html += '<div class="rcpt-bumon-title" data-bumon="' + esc(bumon) + '">' + esc(bumon) + '</div>';
+
+        html += '<table class="rcpt-items">';
+        html += '<thead><tr><th>商品名</th><th>単価</th><th>数量</th><th>値引額</th><th>値引詳細</th><th>請求小計</th></tr></thead>';
+        html += '<tbody>';
+        bItems.forEach(function(it) {
+            var nebDetail = '-';
+            var nebAmt = 0;
+            if (it.nebiki_ritsu > 0) {
+                nebDetail = it.nebiki_ritsu + '%引';
+                nebAmt = it.nebiki_gaku || Math.round(it.price * it.nebiki_ritsu / 100);
+            } else if (it.nebiki_gaku > 0) {
+                nebDetail = '¥' + it.nebiki_gaku.toLocaleString() + '引';
+                nebAmt = it.nebiki_gaku;
+            }
+            html += '<tr>';
+            html += '<td>' + esc(it.name) + '</td>';
+            html += '<td>¥' + it.price.toLocaleString() + '</td>';
+            html += '<td>' + it.qty + '</td>';
+            html += '<td class="nebiki-cell">' + (nebAmt > 0 ? '¥' + nebAmt.toLocaleString() : '-') + '</td>';
+            html += '<td class="nebiki-cell">' + nebDetail + '</td>';
+            html += '<td>¥' + it.subtotal.toLocaleString() + '</td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+
+        html += '<div class="rcpt-bumon-subtotal">';
+        html += '<span>' + esc(bumon) + ' 小計</span>';
+        html += '<span class="amt">¥' + bSubtotal.toLocaleString() + '</span>';
+        html += '</div>';
+
+        if (code) {
+            html += '<div class="rcpt-bumon-code">';
+            html += '<svg id="bc-' + esc(bumon) + '"></svg>';
+            html += '<span>' + code + '</span>';
+            html += '</div>';
+        }
+
+        html += '</div>'; /* .rcpt-bumon-section */
+    });
+
+    /* 合計 */
+    html += '<div class="rcpt-grand-total">';
+    html += '<span class="label">合　計</span>';
+    html += '<div>';
+    html += '<span class="amount">¥' + grandTotal.toLocaleString() + '</span>';
+    html += '<span class="tax">（税込）</span>';
+    html += '</div></div>';
+
+    html += '<div class="rcpt-footer-msg">ありがとうございました</div>';
+    html += '<div class="rcpt-corp">';
+    html += '<div style="font-weight:bold;">株式会社富惣</div>';
+    html += '<div>大阪府堺市堺区遠里小野町３丁４番１号</div>';
+    html += '<div>TEL 072-229-8800 / FAX 072-229-4700</div>';
+    html += '<div>お問い合せ窓口 0120-014-868</div>';
+    html += '</div>';
+    html += '</div>'; /* .rcpt-card */
+
+    /* StarWebPRNT 用にレシートデータをセット（未設定部門はスキップ） */
+    var _barCodes = {};
+    order.forEach(function(bumon) {
+        var bItems = groups[bumon];
+        var bSub   = bItems.reduce(function(s,it){ return s + it.subtotal; }, 0);
+        var bc = makeInstoreCode(bumon, bSub);
+        if (bc) _barCodes[bumon] = bc;
+    });
+    _starReceiptData = {
+        storeName : '<?= htmlspecialchars($store_name, ENT_QUOTES) ?>',
+        dateStr   : dateStr,
+        receiptNo : String(receiptNo),
+        groups    : groups,
+        catOrder  : order,
+        grandTotal: grandTotal,
+        isKakunin : false,
+        barCodes  : _barCodes,
+        count     : count
+    };
+
+    /* ボタン */
+    html += '<div class="rcpt-buttons">';
+    html += '<button class="rcpt-btn-print" id="rcpt-print-btn">🖨 印刷</button>';
+    html += '<button class="rcpt-btn-next" id="rcpt-close">次のお客様へ →</button>';
+    html += '</div>';
+
+    inner.innerHTML = html;
+    overlay.classList.add('show');
+
+    /* バーコード描画（未設定部門はスキップ） */
+    order.forEach(function(bumon) {
+        var bItems = groups[bumon];
+        var bSubtotal = bItems.reduce(function(s,it){ return s + it.subtotal; }, 0);
+        var code = makeInstoreCode(bumon, bSubtotal);
+        if (!code) return;
+        try {
+            JsBarcode('#bc-' + CSS.escape(bumon), code, {
+                format: 'EAN13',
+                width: 2,
+                height: 50,
+                displayValue: false,
+                margin: 4
+            });
+        } catch(e) { console.warn('Barcode error for ' + bumon + ':', e); }
+    });
+
+    /* 印刷ボタン */
+    document.getElementById('rcpt-print-btn').addEventListener('click', function() {
+        starPrintReceipt(this);
+    });
+
+    /* 閉じるボタン */
+    document.getElementById('rcpt-close').addEventListener('click', function() {
+        overlay.classList.remove('show');
+    });
 }
 
 })();

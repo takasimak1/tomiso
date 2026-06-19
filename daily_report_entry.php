@@ -1,0 +1,856 @@
+<?php
+/**
+ * daily_report_entry.php  売上日報 入力画面
+ * ・12時/15時/17時/閉店後を縦並び表示
+ * ・右列に前年同週同曜日データを表示
+ * ・部門選択はアコーディオン形式（localStorage保存）
+ */
+use fmRESTor\fmRESTor;
+session_start();
+if (!isset($_SESSION['user'])) { header('Location: login.php'); exit(); }
+if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
+
+require_once __DIR__ . '/src/fmRESTor.php';
+require_once __DIR__ . '/fm_setting.php';
+
+$store_id   = $_SESSION['store_id']   ?? '';
+$store_name = $_SESSION['store_name'] ?? '';
+
+// ---- 対象日付 ----
+$target_date_fm = $_GET['date'] ?? date('m/d/Y');
+$dt = \DateTime::createFromFormat('m/d/Y', $target_date_fm) ?: new \DateTime();
+$week_ja = ['Sunday'=>'日','Monday'=>'月','Tuesday'=>'火','Wednesday'=>'水',
+            'Thursday'=>'木','Friday'=>'金','Saturday'=>'土'];
+$target_date_jp = $dt->format('Y年n月j日') . '（' . ($week_ja[$dt->format('l')] ?? '') . '）';
+
+// 日付ナビ用
+$today_dt   = new DateTime(); $today_dt->setTime(0,0,0);
+$dt_clone   = clone $dt;     $dt_clone->setTime(0,0,0);
+$prev_dt    = (clone $dt_clone)->modify('-1 day');
+$next_dt    = (clone $dt_clone)->modify('+1 day');
+$is_today_page  = ($dt_clone == $today_dt);
+$is_future_page = ($dt_clone > $today_dt);
+// ▶ボタン：30日先まで進めるよう制限
+$max_nav_dt      = (clone $today_dt)->modify('+30 days');
+$next_is_too_far = ($next_dt > $max_nav_dt);
+$prev_date_fm   = $prev_dt->format('m/d/Y');
+$next_date_fm   = $next_dt->format('m/d/Y');
+$date_html      = $dt_clone->format('Y-m-d'); // HTML date input 用
+$date_html_max  = $max_nav_dt->format('Y-m-d'); // date picker 上限
+
+// ---- 前年同週同曜日の日付を計算 ----
+$cur_ts  = $dt->getTimestamp();
+$cur_week = (int)date('W', $cur_ts);
+$cur_dow  = (int)date('N', $cur_ts);   // 1=月 … 7=日
+$py_year  = (int)$dt->format('Y') - 1;
+
+// 前年 ISO week1 の月曜日を求める
+$py_jan4     = mktime(0, 0, 0, 1, 4, $py_year);
+$py_w1_mon   = $py_jan4 - ((int)date('N', $py_jan4) - 1) * 86400;
+$py_target_ts = $py_w1_mon + (($cur_week - 1) * 7 + ($cur_dow - 1)) * 86400;
+$py_target_fm = date('m/d/Y', $py_target_ts);
+$py_date_jp   = date('Y年n月j日', $py_target_ts) . '（' . ($week_ja[date('l', $py_target_ts)] ?? '') . '）';
+
+// ---- 全部門定義（表示対象のみ） ----
+$all_busho = [
+    '売上_天ぷら'         => '天ぷら',
+    '売上_魚'             => '魚',
+    '売上_唐揚'           => '唐揚',
+    '売上_冷惣菜'         => '冷惣菜',
+    '売上_催事'           => '催事',
+    '売上_イカ焼'         => 'イカ焼',
+    '売上_エキタカ'       => 'エキタカ',
+    '売上_くじら'         => 'くじら',
+    '売上_コンビニデリカ' => 'コンビニデリカ',
+    '売上_セルフ唐揚'     => 'セルフ唐揚',
+    '売上_セルフ天丼'     => 'セルフ天丼',
+    '売上_セルフ惣菜'     => 'セルフ惣菜',
+    '売上_フライ'         => 'フライ',
+    '売上_串揚'           => '串揚',
+    '売上_丼'             => '丼',
+    '売上_個食'           => '個食',
+    '売上_弁当'           => '弁当',
+    '売上_弁当Ⅱ'         => '弁当Ⅱ',
+    '売上_生串揚'         => '生串揚',
+    '売上_鯛'             => '鯛',
+];
+
+// ---- FM 接続 ----
+$fm = new fmRESTor($host, $db, $layout_daily_report,
+                   $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+
+// 当日レコード取得
+$record_id      = null;
+$fd             = [];
+$nyuryoku_jotai = '未入力';
+
+$qr = $fm->findRecords([
+    'query' => [['fk_店舗No' => $store_id, '売上日' => $target_date_fm]],
+    'limit' => 1,
+]);
+if (($qr['result']['messages'][0]['code'] ?? '0') !== '401') {
+    $rec = $qr['result']['response']['data'][0] ?? null;
+    if ($rec) {
+        $record_id      = $rec['recordId'];
+        $fd             = $rec['fieldData'];
+        $nyuryoku_jotai = $fd['入力状態'] ?? '未入力';
+    }
+}
+$is_kakutei = ($nyuryoku_jotai === '確定');
+
+// 前年同週同曜日レコード取得
+$py_fd = [];
+$qr2 = $fm->findRecords([
+    'query' => [['fk_店舗No' => $store_id, '売上日' => $py_target_fm]],
+    'limit' => 1,
+]);
+if (($qr2['result']['messages'][0]['code'] ?? '0') !== '401') {
+    $rec2 = $qr2['result']['response']['data'][0] ?? null;
+    if ($rec2) $py_fd = $rec2['fieldData'];
+}
+
+// ---- POST 処理 ----
+$success_msg = '';
+
+// GET msg（確定解除後リダイレクト）
+if (($_GET['msg'] ?? '') === 'kaijo') {
+    $success_msg = '🔓 確定を解除しました。';
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+
+    // ---- 確定解除 ----
+    if ($action === 'kaijo' && $is_kakutei && $record_id !== null) {
+        $fm->editRecord($record_id, ['fieldData' => ['入力状態' => '入力中']]);
+        header('Location: ?date=' . urlencode($target_date_fm) . '&msg=kaijo');
+        exit();
+    }
+
+    $save   = [];
+    if ($is_kakutei) goto skip_save;
+
+    if ($action === 'save_12') {
+        $save = ['客数_12時' => _int('客数_12時'), '売上累計_12時' => _int('売上累計_12時')];
+    } elseif ($action === 'save_15') {
+        $save = ['客数_15時' => _int('客数_15時'), '売上累計_15時' => _int('売上累計_15時')];
+    } elseif ($action === 'save_17') {
+        $save = ['客数_17時' => _int('客数_17時'), '売上累計_17時' => _int('売上累計_17時')];
+    } elseif ($action === 'save_heiten' || $action === 'kakutei') {
+        foreach (array_keys($all_busho) as $f) {
+            $save[$f] = _int($f);
+        }
+        // 合計売上はFM計算フィールドのため送信しない
+        $save['客数_閉店後'] = _int('客数_閉店後');
+        if ($action === 'kakutei') {
+            $save['入力状態'] = '確定';
+            $save['確定日時'] = date('m/d/Y H:i:s');
+        }
+    }
+
+    if (!empty($save)) {
+        $save['入力状態'] = $save['入力状態'] ?? '入力中';
+
+        $fm_ok = false;
+        $fm_err_code = '';
+        $fm_err_msg  = '';
+
+        if ($record_id === null) {
+            // 新規作成
+            $save['fk_店舗No'] = $store_id;
+            $save['店舗名']    = $store_name;
+            $save['売上日']    = $target_date_fm;
+            $res = $fm->createRecord(['fieldData' => $save]);
+            $fm_err_code = (string)($res['result']['messages'][0]['code'] ?? '?');
+            $fm_err_msg  = $res['result']['messages'][0]['message'] ?? '';
+            if ($fm_err_code === '0') {
+                $fm_ok     = true;
+                $record_id = $res['result']['response']['recordId'] ?? null;
+            } else {
+                // 部門フィールドを除いてリトライ（レイアウト未登録フィールド対策）
+                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho), ARRAY_FILTER_USE_KEY);
+                $res2b = $fm->createRecord(['fieldData' => $save_base]);
+                $code2b = (string)($res2b['result']['messages'][0]['code'] ?? '?');
+                if ($code2b === '0') {
+                    $fm_ok      = true;
+                    $record_id  = $res2b['result']['response']['recordId'] ?? null;
+                    $fm_err_msg = '⚠️ 部門売上はFMレイアウトに未登録のため保存できませんでした（FM code: ' . $fm_err_code . '）。FMレイアウト daily_report_API に部門フィールドを追加してください。';
+                }
+            }
+        } else {
+            // 既存レコード更新
+            $res = $fm->editRecord($record_id, ['fieldData' => $save]);
+            $fm_err_code = (string)($res['result']['messages'][0]['code'] ?? '?');
+            $fm_err_msg  = $res['result']['messages'][0]['message'] ?? '';
+            if ($fm_err_code === '0') {
+                $fm_ok = true;
+            } else {
+                // 部門フィールドを除いてリトライ
+                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho), ARRAY_FILTER_USE_KEY);
+                $res2b = $fm->editRecord($record_id, ['fieldData' => $save_base]);
+                $code2b = (string)($res2b['result']['messages'][0]['code'] ?? '?');
+                if ($code2b === '0') {
+                    $fm_ok      = true;
+                    $fm_err_msg = '⚠️ 部門売上はFMレイアウトに未登録のため保存できませんでした（FM code: ' . $fm_err_code . ' / ' . $res['result']['messages'][0]['message'] . '）。FMレイアウト daily_report_API に部門フィールドを追加してください。';
+                }
+            }
+        }
+
+        if ($fm_ok && $record_id) {
+            $res3 = $fm->getRecord($record_id);
+            $r3   = $res3['result']['response']['data'][0] ?? null;
+            if ($r3) {
+                $fd             = $r3['fieldData'];
+                $nyuryoku_jotai = $fd['入力状態'] ?? '入力中';
+                $is_kakutei     = ($nyuryoku_jotai === '確定');
+            }
+        }
+
+        if (!$fm_ok) {
+            $success_msg = '❌ 保存エラー（FM code: ' . $fm_err_code . ' / ' . $fm_err_msg . '）';
+        } elseif ($fm_err_msg !== '') {
+            $base_msg    = ($action === 'kakutei') ? '✅ 確定しました。' : '💾 保存しました。';
+            $success_msg = $base_msg . '<br><small style="color:#e65100;">' . htmlspecialchars($fm_err_msg) . '</small>';
+        } else {
+            $success_msg = ($action === 'kakutei') ? '✅ 確定しました。' : '💾 保存しました。';
+        }
+    }
+    skip_save:;
+}
+
+// ---- ヘルパー ----
+function _int(string $key): int { return (int)($_POST[$key] ?? 0); }
+
+function fv(array $fd, string $key): string {
+    $v = (int)($fd[$key] ?? 0);
+    return $v > 0 ? (string)$v : '';
+}
+function py(array $py_fd, string $key): string {
+    $v = (int)($py_fd[$key] ?? 0);
+    return $v > 0 ? number_format($v) : '―';
+}
+
+// 当年・前年 部門合計
+function bushoGoukei(array $fd, array $keys): int {
+    return array_sum(array_map(fn($k) => (int)($fd[$k] ?? 0), $keys));
+}
+$busho_keys   = array_keys($all_busho);
+$goukei_this  = bushoGoukei($fd,    $busho_keys);
+$goukei_py    = bushoGoukei($py_fd, $busho_keys);
+// FM計算フィールド「合計売上」を表示用に使用（PHP集計より正確）
+$goukei_fm    = (int)($fd['合計売上']    ?? 0);
+$goukei_py_fm = (int)($py_fd['合計売上'] ?? 0);
+
+$badge_map = ['未入力' => 'secondary', '入力中' => 'warning text-dark', '確定' => 'success'];
+$badge_cls = $badge_map[$nyuryoku_jotai] ?? 'secondary';
+
+include __DIR__ . '/header.php';
+?>
+
+<style>
+:root { --pos-font-size: 17px; }
+.dr-wrap {
+    font-size: var(--pos-font-size);
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 0 0.4em 3em;
+}
+
+/* ページヘッダー */
+.dr-header {
+    text-align: center;
+    padding: 0.7em 0 0.5em;
+    border-bottom: 2px solid #e0e0e0;
+    margin-bottom: 0.8em;
+}
+.dr-header .store-name { font-size: 1.1em; font-weight: bold; color: #004d40; }
+.dr-header .target-date { font-size: 0.82em; color: #888; margin-top: 0.2em; }
+
+/* セクション */
+.dr-section {
+    background: #fff;
+    border-radius: 0.8em;
+    border: 2px solid #e0e0e0;
+    margin-bottom: 0.8em;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,.04);
+}
+.dr-section-head {
+    background: #004d40;
+    color: #fff;
+    padding: 0.5em 0.9em;
+    font-size: 0.88em;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.dr-section-head .done-mark {
+    font-size: 0.85em;
+    background: #4caf50;
+    border-radius: 1em;
+    padding: 0.1em 0.6em;
+}
+.dr-section-body { padding: 0.7em 0.9em; }
+
+/* 比較グリッド（ラベル | 入力 | 前年） */
+.cmp-grid {
+    display: grid;
+    grid-template-columns: 5em 1fr 5.5em;
+    align-items: center;
+    gap: 0.4em 0.5em;
+    margin-bottom: 0.3em;
+}
+.cmp-label {
+    font-size: 0.85em;
+    color: #444;
+    text-align: right;
+    white-space: nowrap;
+}
+.cmp-input {
+    font-size: 1.25em;
+    font-weight: bold;
+    text-align: right;
+    padding: 0.3em 0.5em;
+    border: 2px solid #ccc;
+    border-radius: 0.5em;
+    background: #fafafa;
+    color: #004d40;
+    width: 100%;
+    box-sizing: border-box;
+    -webkit-appearance: none;
+}
+.cmp-input:focus {
+    outline: none;
+    border-color: #004d40;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(0,77,64,.12);
+}
+.cmp-input:disabled {
+    background: #f0f0f0;
+    color: #999;
+    border-color: #ddd;
+}
+.cmp-unit {
+    font-size: 0.75em;
+    color: #888;
+    display: inline;
+    margin-left: 0.2em;
+}
+.cmp-py {
+    font-size: 0.88em;
+    text-align: right;
+    color: #555;
+    white-space: nowrap;
+}
+.cmp-py .py-val { font-weight: bold; color: #1565c0; }
+.cmp-py .py-none { color: #ccc; }
+
+/* 前年ヘッダー行 */
+.cmp-header {
+    display: grid;
+    grid-template-columns: 5em 1fr 5.5em;
+    gap: 0.4em 0.5em;
+    margin-bottom: 0.1em;
+}
+.cmp-header span {
+    font-size: 0.72em;
+    color: #aaa;
+    text-align: right;
+}
+.cmp-header .h-input { text-align: center; }
+
+/* 合計行 */
+.total-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.4em 0 0;
+    border-top: 2px solid #004d40;
+    margin-top: 0.5em;
+}
+.total-bar .t-label { font-size: 0.85em; font-weight: bold; color: #004d40; }
+.total-bar .t-this  { font-size: 1.25em; font-weight: bold; color: #004d40; }
+.total-bar .t-py    { font-size: 0.88em; color: #1565c0; font-weight: bold; text-align: right; }
+
+/* 保存ボタン */
+.save-btn {
+    display: block; width: 100%;
+    padding: 0.65em;
+    margin-top: 0.6em;
+    background: #004d40; color: #fff;
+    border: none; border-radius: 0.5em;
+    font-size: 0.95em; font-weight: bold;
+    cursor: pointer; transition: background .15s;
+}
+.save-btn:hover { background: #00695c; }
+.save-btn.kakutei { background: #b71c1c; margin-top: 0.35em; }
+.save-btn.kakutei:hover { background: #c62828; }
+.save-btn:disabled { background: #ccc; cursor: default; }
+
+/* アコーディオン（部門設定） */
+.accord-wrap { margin-bottom: 0.6em; }
+.accord-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5em 0.7em;
+    background: #f0f8f0;
+    border: 1px solid #c8d8c8;
+    border-radius: 0.5em;
+    cursor: pointer;
+    font-size: 0.82em;
+    font-weight: bold;
+    color: #004d40;
+    user-select: none;
+}
+.accord-head .accord-arrow { transition: transform .2s; }
+.accord-head.open .accord-arrow { transform: rotate(180deg); }
+.accord-body {
+    display: none;
+    padding: 0.7em;
+    border: 1px solid #c8d8c8;
+    border-top: none;
+    border-radius: 0 0 0.5em 0.5em;
+    background: #fafff8;
+}
+.accord-body.open { display: block; }
+
+.bumon-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.35em;
+    margin-bottom: 0.6em;
+}
+.bumon-cb-label {
+    display: flex; align-items: center; gap: 0.35em;
+    font-size: 0.88em;
+    padding: 0.25em 0.4em;
+    border-radius: 0.35em;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    background: #fff;
+}
+.bumon-cb-label:hover { background: #f0f8f0; }
+.bumon-cb-label input { width: 1.1em; height: 1.1em; flex-shrink: 0; }
+.accord-save-btn {
+    background: #004d40; color: #fff;
+    border: none; border-radius: 0.4em;
+    padding: 0.5em 1.2em;
+    font-size: 0.88em; font-weight: bold;
+    cursor: pointer;
+}
+.accord-save-btn:hover { background: #00695c; }
+
+/* 部門行（未選択は非表示） */
+.busho-cmp { display: none; }
+.busho-cmp.active { display: contents; }
+
+/* 確定バナー */
+.kakutei-banner {
+    background: #e8f5e9; border: 2px solid #4caf50;
+    border-radius: 0.7em; padding: 0.8em;
+    text-align: center; font-weight: bold;
+    color: #2e7d32; margin-bottom: 0.8em;
+}
+.kaijo-btn {
+    display: inline-block;
+    margin-top: 0.5em;
+    padding: 0.35em 1.2em;
+    background: #fff3e0;
+    color: #e65100;
+    border: 2px solid #e65100;
+    border-radius: 0.5em;
+    font-size: 0.82em;
+    font-weight: bold;
+    cursor: pointer;
+}
+.kaijo-btn:hover { background: #ffe0b2; }
+
+/* 日付ナビ */
+.date-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
+    margin-top: 0.5em;
+}
+.date-nav-btn {
+    background: #004d40; color: #fff;
+    border: none; border-radius: 0.4em;
+    padding: 0.25em 0.7em;
+    font-size: 1em; font-weight: bold;
+    cursor: pointer; text-decoration: none;
+    line-height: 1.6;
+}
+.date-nav-btn:hover { background: #00695c; color:#fff; }
+.date-nav-btn.disabled {
+    background: #ccc; cursor: default; pointer-events: none;
+}
+.date-input-wrap input[type=date] {
+    font-size: 0.88em;
+    padding: 0.25em 0.5em;
+    border: 2px solid #004d40;
+    border-radius: 0.4em;
+    color: #004d40;
+    font-weight: bold;
+    cursor: pointer;
+    background: #f0faf8;
+}
+
+/* 前年日付ラベル */
+.py-date-label {
+    font-size: 0.72em; color: #aaa; text-align: right;
+    margin-bottom: 0.3em;
+}
+
+/* 注意書き */
+.spec-note {
+    font-size: 0.76em;
+    color: #555;
+    background: #fffde7;
+    border-left: 3px solid #f9a825;
+    border-radius: 0 0.4em 0.4em 0;
+    padding: 0.45em 0.7em;
+    margin-top: 0.4em;
+    line-height: 1.6;
+}
+.spec-note .spec-note-title {
+    font-weight: bold;
+    color: #e65100;
+    margin-bottom: 0.2em;
+}
+.spec-note ul {
+    margin: 0.2em 0 0 1.2em;
+    padding: 0;
+}
+.spec-note li { margin-bottom: 0.1em; }
+</style>
+
+<div class="dr-wrap">
+
+  <!-- ページヘッダー -->
+  <div class="dr-header">
+    <div class="store-name">📋 売上日報入力</div>
+    <div class="target-date">
+      <?= htmlspecialchars($store_name) ?> ／ <?= htmlspecialchars($target_date_jp) ?>
+      <span class="badge bg-<?= $badge_cls ?> ms-1" style="font-size:.75em;"><?= $nyuryoku_jotai ?></span>
+    </div>
+    <!-- 日付ナビ -->
+    <div class="date-nav">
+      <a class="date-nav-btn" href="?date=<?= urlencode($prev_date_fm) ?>">◀</a>
+      <span class="date-input-wrap">
+        <input type="date" id="date-picker" value="<?= $date_html ?>"
+               max="<?= $date_html_max ?>"
+               onchange="goDate(this.value)">
+      </span>
+      <a class="date-nav-btn <?= $next_is_too_far ? 'disabled' : '' ?>"
+         href="?date=<?= urlencode($next_date_fm) ?>">▶</a>
+    </div>
+    <!-- 日付ナビ仕様注意書き -->
+    <div class="spec-note" style="text-align:left; margin-top:0.5em;">
+      <div class="spec-note-title">ℹ 日付ナビゲーションについて</div>
+      <ul>
+        <li>◀▶ で前後の日付に移動できます。</li>
+        <li>▶ は本日から最大 <strong>30日先</strong> まで進めることができます。</li>
+        <li>未来の日付は <strong>前年データの参照のみ</strong> 可能です（入力・保存はできません）。</li>
+      </ul>
+    </div>
+  </div>
+
+  <?php if ($success_msg): ?>
+    <?php
+      $alert_cls = (str_starts_with($success_msg, '❌')) ? 'alert-danger'
+                 : (str_starts_with($success_msg, '⚠️') ? 'alert-warning' : 'alert-success');
+    ?>
+    <div class="alert <?= $alert_cls ?> py-2 text-center mb-2" style="font-size:.88em;"><?= $success_msg ?></div>
+  <?php endif; ?>
+  <?php if ($is_future_page): ?>
+    <div class="kakutei-banner" style="background:#e3f2fd; border-left-color:#1565c0; color:#1565c0;">
+      📅 この日付はまだ到来していません。前年データの参照のみ可能です。
+    </div>
+  <?php endif; ?>
+  <?php if ($is_kakutei): ?>
+    <div class="kakutei-banner">
+      ✅ この日の売上日報は確定済みです。
+      <br>
+      <form method="post" style="display:inline;">
+        <input type="hidden" name="action" value="kaijo">
+        <button type="button" class="kaijo-btn"
+                onclick="if(confirm('確定を解除すると再入力が可能になります。\nよろしいですか？')) this.closest('form').submit()">
+          🔓 確定を解除する
+        </button>
+      </form>
+    </div>
+  <?php endif; ?>
+
+  <!-- 前年日付表示 -->
+  <div class="py-date-label">前年同週同曜日：<?= htmlspecialchars($py_date_jp) ?></div>
+  <!-- 前年データ仕様注意書き -->
+  <div class="spec-note" style="margin-bottom:0.6em;">
+    <div class="spec-note-title">ℹ 前年データ（右列）について</div>
+    <ul>
+      <li>右列に表示される前年データは <strong>前年同週同曜日</strong> のデータです（同じ曜日・ISO週）。</li>
+      <li>前年データは参照のみで、編集はできません。</li>
+    </ul>
+  </div>
+
+  <?php
+  // 比較ヘッダー行（共通）
+  $cmp_header = '<div class="cmp-header">
+      <span></span>
+      <span class="h-input">本　年</span>
+      <span>前年同曜日</span>
+  </div>';
+
+  // 時間帯セクション出力関数
+  function timeSec(string $id, string $label, string $action,
+                   string $field_kyaku, string $field_uriage,
+                   array $fd, array $py_fd, bool $is_kakutei,
+                   string $cmp_header): void {
+      $done = (int)($fd[$field_kyaku] ?? 0) > 0;
+      echo '<div class="dr-section">';
+      echo '<div class="dr-section-head">' . $label;
+      if ($done) echo ' <span class="done-mark">✓ 入力済</span>';
+      echo '</div>';
+      echo '<div class="dr-section-body">';
+      echo $cmp_header;
+      echo '<form method="post">';
+      echo '<input type="hidden" name="action" value="' . $action . '">';
+
+      // 客数
+      $pyv_k = (int)($py_fd[$field_kyaku] ?? 0);
+      echo '<div class="cmp-grid">';
+      echo '<span class="cmp-label">客　数</span>';
+      echo '<div><input class="cmp-input" type="number" name="' . $field_kyaku . '" inputmode="numeric" value="' . fv($fd, $field_kyaku) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">人</span></div>';
+      echo '<div class="cmp-py">' . ($pyv_k > 0 ? '<span class="py-val">' . number_format($pyv_k) . '</span> 人' : '<span class="py-none">―</span>') . '</div>';
+      echo '</div>';
+
+      // 累計売上
+      $pyv_u = (int)($py_fd[$field_uriage] ?? 0);
+      echo '<div class="cmp-grid">';
+      echo '<span class="cmp-label">累計売上</span>';
+      echo '<div><input class="cmp-input" type="number" name="' . $field_uriage . '" inputmode="numeric" value="' . fv($fd, $field_uriage) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">円</span></div>';
+      echo '<div class="cmp-py">' . ($pyv_u > 0 ? '<span class="py-val">¥' . number_format($pyv_u) . '</span>' : '<span class="py-none">―</span>') . '</div>';
+      echo '</div>';
+
+      if (!$is_kakutei) {
+          echo '<button type="submit" class="save-btn">💾 ' . preg_replace('/[🕛🕒🕔]\s*/', '', $label) . ' を保存</button>';
+      }
+      echo '</form>';
+      echo '</div></div>';
+  }
+  ?>
+
+  <!-- 12時 -->
+  <?php timeSec('j12', '🕛 12時', 'save_12',
+      '客数_12時', '売上累計_12時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header); ?>
+
+  <!-- 15時 -->
+  <?php timeSec('j15', '🕒 15時', 'save_15',
+      '客数_15時', '売上累計_15時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header); ?>
+
+  <!-- 17時 -->
+  <?php timeSec('j17', '🕔 17時', 'save_17',
+      '客数_17時', '売上累計_17時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header); ?>
+
+  <!-- 閉店後 -->
+  <div class="dr-section">
+    <div class="dr-section-head">
+      🔒 閉店後
+      <?php if ($goukei_fm > 0): ?>
+        <span class="done-mark">✓ 入力済</span>
+      <?php endif; ?>
+    </div>
+    <div class="dr-section-body">
+
+      <!-- ▼ 部門設定アコーディオン -->
+      <div class="accord-wrap">
+        <div class="accord-head" id="accord-head" onclick="toggleAccord()">
+          ⚙ 自店の取扱部門を設定（クリックで開閉）
+          <span class="accord-arrow">▼</span>
+        </div>
+        <div class="accord-body" id="accord-body">
+          <div class="bumon-grid">
+            <?php foreach ($all_busho as $field => $label): ?>
+            <label class="bumon-cb-label">
+              <input type="checkbox" class="bumon-cb" value="<?= $field ?>">
+              <?= $label ?>
+            </label>
+            <?php endforeach; ?>
+          </div>
+          <button type="button" class="accord-save-btn" onclick="saveBumonSetting()">
+            この設定で保存して閉じる
+          </button>
+          <div class="spec-note" style="margin-top:0.6em;">
+            <div class="spec-note-title">ℹ 部門設定について</div>
+            <ul>
+              <li>チェックした部門のみ入力欄に表示されます。</li>
+              <li>設定は <strong>このブラウザ（端末）に保存</strong> されます。</li>
+              <li>別の端末やブラウザでは再設定が必要です。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- 部門別売上フォーム -->
+      <form method="post" id="form-heiten">
+        <input type="hidden" name="action" id="heiten-action" value="save_heiten">
+
+        <!-- 部門一覧 -->
+        <?= $cmp_header ?>
+        <?php foreach ($all_busho as $field => $label): ?>
+        <?php $pyv = (int)($py_fd[$field] ?? 0); ?>
+        <div class="cmp-grid busho-cmp" data-field="<?= $field ?>">
+          <span class="cmp-label"><?= $label ?></span>
+          <div>
+            <input class="cmp-input busho-input" type="number" name="<?= $field ?>"
+                   inputmode="numeric" value="<?= fv($fd, $field) ?>"
+                   <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?> min="0">
+            <span class="cmp-unit">円</span>
+          </div>
+          <div class="cmp-py">
+            <?= $pyv > 0 ? '<span class="py-val">¥' . number_format($pyv) . '</span>' : '<span class="py-none">―</span>' ?>
+          </div>
+        </div>
+        <?php endforeach; ?>
+
+        <!-- 合計行 -->
+        <div class="total-bar">
+          <span class="t-label">合　計</span>
+          <span class="t-this" id="busho-goukei">
+            <?= $goukei_fm > 0 ? '¥' . number_format($goukei_fm) : '―' ?>
+          </span>
+          <span class="t-py">
+            <?= $goukei_py_fm > 0 ? '前年 ¥' . number_format($goukei_py_fm) : '' ?>
+          </span>
+        </div>
+
+        <!-- 客数合計 -->
+        <div style="margin-top:0.9em;">
+          <?= $cmp_header ?>
+          <?php $pyv_k = (int)($py_fd['客数_閉店後'] ?? 0); ?>
+          <div class="cmp-grid">
+            <span class="cmp-label">客数合計</span>
+            <div>
+              <input class="cmp-input" type="number" name="客数_閉店後"
+                     inputmode="numeric" value="<?= fv($fd, '客数_閉店後') ?>"
+                     <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?> min="0">
+              <span class="cmp-unit">人</span>
+            </div>
+            <div class="cmp-py">
+              <?= $pyv_k > 0 ? '<span class="py-val">' . number_format($pyv_k) . '</span> 人' : '<span class="py-none">―</span>' ?>
+            </div>
+          </div>
+        </div>
+
+        <!-- 保存・確定ボタン -->
+        <?php if (!$is_kakutei && !$is_future_page): ?>
+          <button type="button" class="save-btn"
+                  onclick="submitHeiten('save_heiten')">💾 閉店後データを保存</button>
+          <button type="button" class="save-btn kakutei"
+                  onclick="if(confirm('確定すると変更できません。よろしいですか？')) submitHeiten('kakutei')">
+            🔒 本日分を確定する
+          </button>
+        <?php endif; ?>
+      </form>
+
+    </div>
+  </div>
+
+</div><!-- /.dr-wrap -->
+
+<script>
+const STORE_ID  = '<?= htmlspecialchars($store_id) ?>';
+const BUMON_KEY = 'dr_bumon_' + STORE_ID;
+
+// ---- アコーディオン ----
+function toggleAccord() {
+    const head = document.getElementById('accord-head');
+    const body = document.getElementById('accord-body');
+    head.classList.toggle('open');
+    body.classList.toggle('open');
+}
+
+// ---- 閉店後フォーム送信 ----
+function submitHeiten(action) {
+    document.getElementById('heiten-action').value = action;
+    document.getElementById('form-heiten').submit();
+}
+
+// ---- 部門合計リアルタイム計算 ----
+function calcGoukei() {
+    let total = 0;
+    document.querySelectorAll('.busho-input:not([disabled])').forEach(el => {
+        if (el.closest('.busho-cmp.active')) {
+            total += parseInt(el.value || 0, 10);
+        }
+    });
+    // 非表示でも送信される（0として計上）ので合計は全フィールドで
+    total = 0;
+    document.querySelectorAll('.busho-input').forEach(el => {
+        total += parseInt(el.value || 0, 10);
+    });
+    document.getElementById('busho-goukei').textContent =
+        total > 0 ? '¥' + total.toLocaleString() : '―';
+}
+document.querySelectorAll('.busho-input').forEach(el => {
+    el.addEventListener('input', calcGoukei);
+});
+
+// ---- 部門設定 localStorage ----
+function loadBumonSetting() {
+    const saved = localStorage.getItem(BUMON_KEY);
+    if (!saved) {
+        // 初回：アコーディオンを自動オープン
+        document.getElementById('accord-head').classList.add('open');
+        document.getElementById('accord-body').classList.add('open');
+        return;
+    }
+    const active = JSON.parse(saved);
+    applyBumonSetting(active);
+    // チェックボックスにも反映
+    document.querySelectorAll('.bumon-cb').forEach(cb => {
+        cb.checked = active.includes(cb.value);
+    });
+}
+
+function applyBumonSetting(activeFields) {
+    document.querySelectorAll('.busho-cmp').forEach(row => {
+        row.classList.toggle('active', activeFields.includes(row.dataset.field));
+    });
+    // calcGoukei() は初期化時に呼ばない。
+    // FM合計売上（サーバーレンダリング値）を保持するため、
+    // ユーザーが入力フィールドを編集したときのみ更新する。
+}
+
+function saveBumonSetting() {
+    const selected = [];
+    document.querySelectorAll('.bumon-cb:checked').forEach(cb => {
+        selected.push(cb.value);
+    });
+    if (selected.length === 0) {
+        alert('少なくとも1つ選択してください。');
+        return;
+    }
+    localStorage.setItem(BUMON_KEY, JSON.stringify(selected));
+    applyBumonSetting(selected);
+    // アコーディオンを閉じる
+    document.getElementById('accord-head').classList.remove('open');
+    document.getElementById('accord-body').classList.remove('open');
+}
+
+// ---- 日付ナビ ----
+function goDate(val) {
+    if (!val) return;
+    const parts = val.split('-'); // YYYY-MM-DD
+    if (parts.length !== 3) return;
+    const fm = parts[1] + '/' + parts[2] + '/' + parts[0]; // MM/DD/YYYY
+    location.href = '?date=' + encodeURIComponent(fm);
+}
+
+// ---- 初期化 ----
+loadBumonSetting();
+</script>
+
+<?php include __DIR__ . '/footer.php'; ?>
