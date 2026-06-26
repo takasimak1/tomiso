@@ -33,6 +33,19 @@ $month_jp = "{$sel_year}年{$sel_month}月";
 // Excel投入確認シート 除外行：堺・くずは・須磨・川崎・千里丘イズミヤ
 $new_store_names = ['堺', 'くずは', '須磨', '川崎', '千里丘イズミヤ'];
 
+// ---- 閉店店舗リスト取得（アカウントマスタ） ----
+$fm_acct  = new fmRESTor($host, $db, $layout_account,
+                          $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+$acct_res = $fm_acct->getRecords(['_limit' => 300]);
+$closed_stores = []; // sno => true
+foreach ($acct_res['result']['response']['data'] ?? [] as $arec) {
+    $af  = $arec['fieldData'];
+    $asn = (string)($af['店舗Ｎｏ'] ?? '');
+    if (trim($af['営業状態'] ?? '') === '閉店') {
+        $closed_stores[$asn] = true;
+    }
+}
+
 // ---- FM 接続 ----
 $fm = new fmRESTor($host, $db, $layout_daily_report,
                    $api_master_user, $api_master_pass, ['allowInsecure' => true]);
@@ -40,8 +53,9 @@ $fm = new fmRESTor($host, $db, $layout_daily_report,
 // ---- 当月データ取得 ----
 $first_fm = sprintf('%02d/01/%04d', $sel_month, $sel_year);
 $last_fm  = sprintf('%02d/%02d/%04d', $sel_month, $days_in_month, $sel_year);
-$cy_days  = [];   // $cy_days[sno][day] = fieldData
-$sno_name = [];   // sno => 店舗名
+$cy_days    = [];   // $cy_days[sno][day] = fieldData
+$sno_name   = [];   // sno => 店舗名
+$unconfirmed = [];  // $unconfirmed[sno][day] = true（入力中だが未確定）
 
 $r1 = $fm->findRecords([
     'query' => [['売上日' => "{$first_fm}...{$last_fm}"]],
@@ -57,7 +71,13 @@ if (($r1['result']['messages'][0]['code'] ?? '0') !== '401') {
         $fmd = $f['売上日'] ?? '';
         $p   = explode('/', $fmd);
         $d   = isset($p[1]) ? (int)$p[1] : 0;
-        if ($d >= 1) $cy_days[$sno][$d] = $f;
+        if ($d >= 1) {
+            $cy_days[$sno][$d] = $f;
+            // 入力状態が「確定」以外は未確定扱い
+            if (trim($f['入力状態'] ?? '') !== '確定') {
+                $unconfirmed[$sno][$d] = true;
+            }
+        }
     }
 }
 
@@ -110,7 +130,10 @@ foreach ($store_nos as $sno) {
         $ky   += (int)(($cy_days[$sno][$d] ?? [])['客数_閉店後'] ?? 0);
     }
     for ($d = 1; $d <= $days_in_py_month; $d++) {
-        $py_t += (int)(($py_days[$sno][$d] ?? [])['合計売上'] ?? 0);
+        // 当年同日が未確定の場合は前年も除外
+        if (!isset($unconfirmed[$sno][$d])) {
+            $py_t += (int)(($py_days[$sno][$d] ?? [])['合計売上'] ?? 0);
+        }
     }
     $cy_total[$sno] = $cy_t;
     $py_total[$sno] = $py_t;
@@ -139,7 +162,9 @@ for ($d = 1; $d <= 31; $d++) {
     foreach ($store_nos as $sno) {
         $name = $sno_name[$sno];
         $cy_v = (int)(($cy_days[$sno][$d] ?? [])['合計売上'] ?? 0);
-        $py_v = (int)(($py_days[$sno][$d] ?? [])['合計売上'] ?? 0);
+        // 未確定の場合は前年を集計から除外
+        $py_v = isset($unconfirmed[$sno][$d]) ? 0
+                : (int)(($py_days[$sno][$d] ?? [])['合計売上'] ?? 0);
         $ca += $cy_v;
         $pa += $py_v;
         if (!is_new_store($name, $new_store_names)) {
@@ -208,6 +233,110 @@ function dow_class(string $dow): string {
     return '';
 }
 
+// =====================================================================
+// Excel エクスポート（本年分）
+// =====================================================================
+if (($_GET['export'] ?? '') === 'excel') {
+    $filename = "投入確認_{$sel_year}年{$sel_month}月_本年.xls";
+    header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . rawurlencode($filename) . '"');
+    header('Cache-Control: no-cache');
+    echo "\xEF\xBB\xBF"; // UTF-8 BOM
+
+    // 曜日列ヘッダー
+    $day_dows_ex = [];
+    for ($d = 1; $d <= $days_in_month; $d++) {
+        $ts = mktime(0,0,0,$sel_month,$d,$sel_year);
+        $day_dows_ex[$d] = $week_ja[date('D',$ts)] ?? '';
+    }
+
+    echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+    echo '<head><meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8"></head><body>';
+    echo '<table border="1">';
+
+    // ヘッダー行1（月表示）
+    $span = 6 + $days_in_month + 2;
+    echo '<tr><th colspan="' . $span . '" style="background:#1a237e;color:#fff;font-size:14px;">'
+       . "{$sel_year}年{$sel_month}月　投入確認（本年）"
+       . '</th></tr>';
+
+    // ヘッダー行2（列名）
+    echo '<tr style="background:#1a237e;color:#fff;">';
+    echo '<th>昨対順位</th><th>売上順位</th><th>昨対比</th><th>前年月計</th><th>本年月計</th><th>店舗名</th>';
+    for ($d = 1; $d <= $days_in_month; $d++) {
+        echo '<th>' . $d . '日(' . $day_dows_ex[$d] . ')</th>';
+    }
+    echo '<th>月計</th><th>客数</th>';
+    echo '</tr>';
+
+    // 店舗行
+    foreach ($store_nos as $sno) {
+        $name      = $sno_name[$sno];
+        $is_new    = is_new_store($name, $new_store_names);
+        $is_closed = isset($closed_stores[$sno]);
+        $cyt       = $cy_total[$sno];
+        $pyt       = $py_total[$sno];
+        $ratio     = $sakutai[$sno];
+        $ru        = $rank_uriage[$sno]  ?? '－';
+        $rs        = $rank_sakutai[$sno] ?? '－';
+        $name_disp = ($is_closed ? '★閉店 ' : '') . $name . ($is_new && !$is_closed ? '★' : '');
+
+        echo '<tr>';
+        echo '<td>' . (($cyt > 0 && $rs !== '－') ? $rs : '－') . '</td>';
+        echo '<td>' . (($cyt > 0) ? $ru : '－') . '</td>';
+        $pct_val = ($ratio !== null) ? number_format($ratio * 100, 1) . '%' : '－';
+        echo '<td>' . $pct_val . '</td>';
+        echo '<td>' . ($pyt > 0 ? $pyt : '') . '</td>';
+        echo '<td>' . ($cyt > 0 ? $cyt : '') . '</td>';
+        echo '<td>' . htmlspecialchars($name_disp) . '</td>';
+        for ($d = 1; $d <= $days_in_month; $d++) {
+            $is_uc = isset($unconfirmed[$sno][$d]);
+            $v = (int)(($cy_days[$sno][$d] ?? [])['合計売上'] ?? 0);
+            if ($is_uc) {
+                echo '<td style="color:#e65100;font-weight:bold;">未確定</td>';
+            } else {
+                echo '<td>' . ($v > 0 ? $v : '') . '</td>';
+            }
+        }
+        echo '<td>' . ($cyt > 0 ? $cyt : '') . '</td>';
+        echo '<td>' . ($cy_kyaku[$sno] > 0 ? $cy_kyaku[$sno] : '') . '</td>';
+        echo '</tr>';
+    }
+
+    // 全店合計行
+    $all_pct = ($py_all_total > 0 && $cy_all_total > 0)
+               ? number_format($cy_all_total / $py_all_total * 100, 1) . '%' : '－';
+    echo '<tr style="background:#e8eaf6;font-weight:bold;">';
+    echo '<td colspan="2">全店</td>';
+    echo '<td>' . $all_pct . '</td>';
+    echo '<td>' . ($py_all_total > 0 ? $py_all_total : '') . '</td>';
+    echo '<td>' . ($cy_all_total > 0 ? $cy_all_total : '') . '</td>';
+    echo '<td>全店合計</td>';
+    for ($d = 1; $d <= $days_in_month; $d++) {
+        echo '<td>' . ($cy_all[$d] > 0 ? $cy_all[$d] : '') . '</td>';
+    }
+    echo '<td>' . $cy_all_total . '</td><td>' . $cy_kyaku_all . '</td>';
+    echo '</tr>';
+
+    // 既存店計行
+    $kz_pct = ($py_kizon_total > 0 && $cy_kizon_total > 0)
+              ? number_format($cy_kizon_total / $py_kizon_total * 100, 1) . '%' : '－';
+    echo '<tr style="background:#fce4ec;font-weight:bold;">';
+    echo '<td colspan="2">既存店</td>';
+    echo '<td>' . $kz_pct . '</td>';
+    echo '<td>' . ($py_kizon_total > 0 ? $py_kizon_total : '') . '</td>';
+    echo '<td>' . ($cy_kizon_total > 0 ? $cy_kizon_total : '') . '</td>';
+    echo '<td>既存店計（★除く）</td>';
+    for ($d = 1; $d <= $days_in_month; $d++) {
+        echo '<td>' . ($cy_kizon[$d] > 0 ? $cy_kizon[$d] : '') . '</td>';
+    }
+    echo '<td>' . $cy_kizon_total . '</td><td>－</td>';
+    echo '</tr>';
+
+    echo '</table></body></html>';
+    exit();
+}
+
 include __DIR__ . '/hq_header.php';
 ?>
 <style>
@@ -228,6 +357,10 @@ include __DIR__ . '/hq_header.php';
 }
 .nav-btn:hover { background:rgba(255,255,255,.3); }
 .nav-btn.disabled { opacity:.35; pointer-events:none; }
+.nav-btn.excel-btn {
+    background: #217346; border-color: #1a5c38;
+}
+.nav-btn.excel-btn:hover { background: #1a5c38; }
 .nav-sel {
     background:rgba(255,255,255,.15); color:#fff;
     border:1px solid rgba(255,255,255,.4); border-radius:.4em;
@@ -236,23 +369,28 @@ include __DIR__ . '/hq_header.php';
 .nav-sel option { background:var(--dark); }
 
 /* ---- テーブル共通 ---- */
-.tbl-wrap { overflow-x:auto; padding:.5em; }
+.tbl-wrap {
+    overflow: auto;
+    max-height: calc(100vh - 130px);
+    padding: .5em;
+}
 table.main-tbl {
-    border-collapse:collapse;
+    border-collapse: collapse;
     font-size: 12px;
-    white-space:nowrap;
+    white-space: nowrap;
 }
 table.main-tbl th, table.main-tbl td {
-    border:1px solid #d0d4e8;
-    padding:.3em .45em;
-    text-align:right;
+    border: 1px solid #d0d4e8;
+    padding: .3em .45em;
+    text-align: right;
 }
-table.main-tbl th {
-    background:var(--dark); color:#fff; position:sticky; top:0;
-    text-align:center;
+table.main-tbl thead th {
+    background: var(--dark); color: #fff;
+    position: sticky; top: 0; z-index: 4;
+    text-align: center;
 }
-table.main-tbl th.dow-sun { background:#b71c1c; }
-table.main-tbl th.dow-sat { background:#1565c0; }
+table.main-tbl th.dow-sun { background: #b71c1c; }
+table.main-tbl th.dow-sat { background: #1565c0; }
 
 /* 固定列 */
 .col-rank1, .col-rank2, .col-ratio, .col-py, .col-cy, .col-name { position:sticky; }
@@ -267,7 +405,11 @@ table.main-tbl th.col-rank2,
 table.main-tbl th.col-ratio,
 table.main-tbl th.col-py,
 table.main-tbl th.col-cy,
-table.main-tbl th.col-name { z-index:5; }
+table.main-tbl th.col-name { z-index: 6; }
+
+/* 未確定・閉店 */
+.mikakunin { color: #e65100; font-size: 0.85em; font-weight: bold; }
+.heiten-name { color: #c62828; font-weight: bold; }
 
 /* データ行 - tr に背景を設定してstickyセルが正しくinheritできるようにする */
 table.main-tbl tbody tr         { background:#fff; }
@@ -330,6 +472,11 @@ table.main-tbl tbody td         { background:inherit; }
       </select>
     </form>
     <a class="nav-btn <?=$is_next_future?'disabled':''?>" href="?year=<?=$next_y?>&month=<?=$next_m?>">翌月 ▶</a>
+    <a class="nav-btn excel-btn"
+       href="?year=<?=$sel_year?>&month=<?=$sel_month?>&export=excel"
+       title="本年分をExcelでダウンロード">
+      📥 Excel
+    </a>
   </div>
 
   <?php
@@ -367,13 +514,14 @@ table.main-tbl tbody td         { background:inherit; }
     </thead>
     <tbody>
     <?php foreach ($store_nos as $sno):
-        $name    = $sno_name[$sno];
-        $is_new  = is_new_store($name, $new_store_names);
-        $cyt     = $cy_total[$sno];
-        $pyt     = $py_total[$sno];
-        $ratio   = $sakutai[$sno];
-        $ru      = $rank_uriage[$sno]  ?? '－';
-        $rs      = $rank_sakutai[$sno] ?? '－';
+        $name      = $sno_name[$sno];
+        $is_new    = is_new_store($name, $new_store_names);
+        $is_closed = isset($closed_stores[$sno]);
+        $cyt       = $cy_total[$sno];
+        $pyt       = $py_total[$sno];
+        $ratio     = $sakutai[$sno];
+        $ru        = $rank_uriage[$sno]  ?? '－';
+        $rs        = $rank_sakutai[$sno] ?? '－';
     ?>
     <tr>
       <td class="col-rank1"><?= ($cyt > 0 && $rs !== '－') ? $rs : '－' ?></td>
@@ -381,12 +529,26 @@ table.main-tbl tbody td         { background:inherit; }
       <td class="col-ratio <?= pct_class($ratio) ?>"><?= fmt_pct($ratio) ?></td>
       <td class="col-py"><?= $pyt > 0 ? '¥'.number_format($pyt) : '－' ?></td>
       <td class="col-cy"><?= $cyt > 0 ? '¥'.number_format($cyt) : '－' ?></td>
-      <td class="col-name <?= $is_new ? 'new-st' : '' ?>"><?= htmlspecialchars($name) ?><?= $is_new ? '★' : '' ?></td>
+      <td class="col-name <?= $is_new ? 'new-st' : '' ?>">
+        <?php if ($is_closed): ?>
+          <span class="heiten-name">★ <?= htmlspecialchars($name) ?></span>
+        <?php else: ?>
+          <?= htmlspecialchars($name) ?><?= $is_new ? '★' : '' ?>
+        <?php endif; ?>
+      </td>
       <?php for ($d = 1; $d <= $days_in_month; $d++):
-        $v = (int)(($cy_days[$sno][$d] ?? [])['合計売上'] ?? 0);
+        $day_f = $cy_days[$sno][$d] ?? null;
+        $v     = (int)(($day_f ?? [])['合計売上'] ?? 0);
+        $is_uc = isset($unconfirmed[$sno][$d]);
       ?>
       <td class="<?= $d===$today_day ? 'today-col-cell' : '' ?>">
-        <?= $v > 0 ? number_format($v) : '<span class="zero">－</span>' ?>
+        <?php if ($is_uc): ?>
+          <span class="mikakunin">未確定</span>
+        <?php elseif ($v > 0): ?>
+          <?= number_format($v) ?>
+        <?php else: ?>
+          <span class="zero">－</span>
+        <?php endif; ?>
       </td>
       <?php endfor; ?>
       <td><?= $cyt > 0 ? number_format($cyt) : '<span class="zero">－</span>' ?></td>

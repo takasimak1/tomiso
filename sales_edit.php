@@ -9,9 +9,55 @@ session_start();
 if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/instore_codes.php';
 
 $store_id   = $_SESSION['store_id'];
 $store_name = $_SESSION['store_name'];
+
+// インストアコード: FM account_API から取得（sales_entry.php と同方式）
+function _fetch_instore_codes_from_fm_edit(string $store_id, string $host, string $db,
+                                            string $layout_account,
+                                            string $api_master_user, string $api_master_pass): array {
+    $dept_fields = [
+        '魚'     => 'インストアコード_魚',
+        '天ぷら' => 'インストアコード_天ぷら',
+        '惣菜'   => 'インストアコード_惣菜',
+        'イカ焼' => 'インストアコード_イカ焼',
+        '唐揚'   => 'インストアコード_唐揚',
+        'レジ袋' => 'インストアコード_レジ袋',
+    ];
+    try {
+        $fm = new \fmRESTor\fmRESTor($host, $db, $layout_account,
+                                      $api_master_user, $api_master_pass,
+                                      ['allowInsecure' => true]);
+        $res = $fm->findRecord([['店舗Ｎｏ' => $store_id]]);
+        $fd  = $res['result']['response']['data'][0]['fieldData'] ?? [];
+        $codes = [];
+        foreach ($dept_fields as $cat => $field) {
+            $v = trim((string)($fd[$field] ?? ''));
+            if ($v !== '') $codes[$cat] = $v;
+        }
+        return $codes;
+    } catch (\Throwable $e) {
+        return [];
+    }
+}
+
+$ic_dept_fm = _fetch_instore_codes_from_fm_edit(
+    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass
+);
+// フォールバック: instore_codes.php の静的設定
+$_ic_static = $instore_config[$store_id] ?? [];
+$_ic_static_dept = $_ic_static['dept'] ?? [];
+if (empty($ic_dept_fm) && !empty($_ic_static_dept)) {
+    $pfx = $_ic_static['prefix'] ?? '00';
+    $ic_dept = [];
+    foreach ($_ic_static_dept as $cat => $code3) {
+        $ic_dept[$cat] = '20' . $pfx . $code3;
+    }
+} else {
+    $ic_dept = $ic_dept_fm;
+}
 
 $raw     = $_GET['data'] ?? '';
 $receipt = json_decode($raw, true);
@@ -665,8 +711,8 @@ var elDelBtn   = document.getElementById('btn-delete-all');
 var RECORD_IDS = <?= json_encode($record_ids) ?>;
 var RECEIPT_NO = '<?= addslashes($receipt_no) ?>';
 var DATE_RAW   = '<?= addslashes($date_raw) ?>';
-var STORE_CD   = '<?= str_pad(substr($store_id, 0, 3), 3, "0", STR_PAD_LEFT) ?>';
-var DEPT_CODE  = {'魚':'01','天ぷら':'02','惣菜':'03','唐揚':'04'};
+// FM から取得したインストアコード（sales_entry.php と同方式）
+var INSTORE_CODES = <?= json_encode($ic_dept, JSON_UNESCAPED_UNICODE) ?>;
 
 // ---- トースト ----
 function showToast(el, msg) {
@@ -682,12 +728,13 @@ function jan13CheckDigit(digits12) {
     return (10 - (sum%10)) % 10;
 }
 
-// ---- インストアコード生成: 20 + 店舗3桁 + 部門2桁 + 金額5桁 + CD1桁 = 13桁 ----
+// ---- インストアコード生成: FM 7桁コード + 金額5桁 + CD1桁 = 13桁 ----
 function makeInstoreCode(bumon, amount) {
-    var dept = DEPT_CODE[bumon] || '99';
+    var prefix7 = INSTORE_CODES[bumon] || '';
+    if (!prefix7) return null;
     var amt  = Math.min(Math.max(0, Math.round(amount)), 99999);
-    var body = '20' + STORE_CD + dept + String(amt).padStart(5, '0');
-    return body + jan13CheckDigit(body);
+    var body = prefix7 + String(amt).padStart(5, '0');   // 7 + 5 = 12桁
+    return body + jan13CheckDigit(body);                  // + CD = 13桁
 }
 
 // ---- 全体削除 ----
@@ -796,13 +843,15 @@ function showReceipt(items, receiptNo, grandTotal, count) {
         });
         html += '</tbody></table>';
         html += '<div class="rcpt-bumon-subtotal"><span>'+esc(bumon)+' 小計</span><span class="amt">¥'+bSubtotal.toLocaleString()+'</span></div>';
-        html += '<div class="rcpt-bumon-code"><svg id="bc-'+esc(bumon)+'"></svg><span>'+code+'</span></div>';
+        if (code) {
+            html += '<div class="rcpt-bumon-code"><svg id="bc-'+esc(bumon)+'"></svg><span>'+code+'</span></div>';
+        }
         html += '</div>';
     });
 
     html += '<div class="rcpt-grand-total"><span class="label">合　計</span><div>';
     html += '<span class="amount">¥'+grandTotal.toLocaleString()+'</span>';
-    html += '<span class="tax">（税込）</span></div></div>';
+    html += '<span class="tax">（本体価格）</span></div></div>';
     html += '<div class="rcpt-footer-msg">ありがとうございました</div>';
     html += '<div class="rcpt-corp">';
     html += '<div style="font-weight:bold;">株式会社富惣</div>';
@@ -842,6 +891,7 @@ function showReceipt(items, receiptNo, grandTotal, count) {
         var bItems = groups[bumon];
         var bSubtotal = bItems.reduce(function(s,it){ return s+it.subtotal; },0);
         var code = makeInstoreCode(bumon, bSubtotal);
+        if (!code) return;
         try {
             JsBarcode('#bc-'+CSS.escape(bumon), code, {
                 format:'EAN13', width:2, height:50, displayValue:false, margin:4

@@ -17,7 +17,7 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
 
     /* ヘッダー */
     req += b.createAlignmentElement({ position: 'center' });
-    req += b.createTextElement({ codepage: 'utf8', width: 2, height: 2, emphasis: 'true', data: '🐟 ' + storeName + '\n' });
+    req += b.createTextElement({ codepage: 'utf8', width: 2, height: 2, emphasis: 'true', data: storeName + '\n' });
     req += b.createTextElement({ width: 1, height: 1 });
     req += b.createTextElement({ emphasis: 'false' });
     req += b.createTextElement({ codepage: 'utf8', data: dateStr + '  No.' + receiptNo + (isKakunin ? '（訂正）' : '') + '\n' });
@@ -79,7 +79,7 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
     req += b.createTextElement({ width: 1, height: 1 });
     req += b.createTextElement({ emphasis: 'false' });
     req += b.createAlignmentElement({ position: 'right' });
-    req += b.createTextElement({ codepage: 'utf8', data: '(税込)\n' });
+    req += b.createTextElement({ codepage: 'utf8', data: '(本体価格)\n' });
     req += b.createFeedElement({ line: 2 });
 
     /* フッター */

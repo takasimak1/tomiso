@@ -45,6 +45,39 @@ if ($fm_code !== '401') {
     $receipt_count = count($receipt_nos);
 }
 
+// 未確定日報チェック（昨日以前・直近60日）
+$unconfirmed_dates = [];
+try {
+    $fm_dr    = new fmRESTor($host, $db, $layout_daily_report,
+                             $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+    $dr_from  = date('m/d/Y', strtotime('-60 days'));
+    $dr_yest  = date('m/d/Y', strtotime('-1 day'));
+    $dr_res   = $fm_dr->findRecords([
+        'query' => [['fk_店舗No' => $store_id,
+                     '売上日'    => $dr_from . '...' . $dr_yest]],
+        'limit' => 120,
+    ]);
+    $dr_code  = $dr_res['result']['messages'][0]['code'] ?? '0';
+    if ($dr_code !== '401') {
+        foreach ($dr_res['result']['response']['data'] ?? [] as $drec) {
+            $df     = $drec['fieldData'];
+            $status = trim($df['入力状態'] ?? '');
+            $uribi  = trim($df['売上日']   ?? '');
+            if ($status !== '確定' && $uribi !== '') {
+                $ts = strtotime($uribi);
+                if ($ts) {
+                    $unconfirmed_dates[] = [
+                        'fm' => $uribi,
+                        'jp' => date('Y年n月j日', $ts),
+                        'ts' => $ts,
+                    ];
+                }
+            }
+        }
+        usort($unconfirmed_dates, fn($a, $b) => $a['ts'] - $b['ts']);
+    }
+} catch (Throwable $e) { /* 取得失敗時は非表示 */ }
+
 include __DIR__ . '/header.php';
 ?>
 <style>
@@ -144,6 +177,58 @@ include __DIR__ . '/header.php';
     background: #004d40; color: #fff;
 }
 .nav-btn.primary:hover { background: #00695c; }
+
+/* お知らせ */
+.oshirase-wrap {
+    margin: 1.2em 0;
+    border-radius: 0.8em;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,.07);
+}
+.oshirase-title {
+    background: #37474f;
+    color: #fff;
+    font-size: 0.82em;
+    font-weight: bold;
+    padding: 0.4em 0.9em;
+    letter-spacing: .06em;
+}
+.oshirase-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7em;
+    padding: 0.8em 1em;
+    background: #fff;
+    border-left: 4px solid #ccc;
+}
+.oshirase-item.warn {
+    border-left-color: #e65100;
+    background: #fff8f5;
+}
+.oshirase-icon { font-size: 1.4em; flex-shrink: 0; }
+.oshirase-head {
+    font-weight: bold;
+    font-size: 0.9em;
+    color: #bf360c;
+    margin-bottom: 0.35em;
+}
+.oshirase-dates {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4em;
+}
+.date-chip {
+    display: inline-block;
+    padding: 0.2em 0.7em;
+    border-radius: 1em;
+    background: #e65100;
+    color: #fff;
+    font-size: 0.78em;
+    font-weight: bold;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.date-chip:hover { background: #bf360c; color: #fff; }
 </style>
 
 <div class="top-wrap">
@@ -205,6 +290,27 @@ include __DIR__ . '/header.php';
       商品メンテ
     </a>
   </div>
+
+  <!-- お知らせ -->
+  <?php if (!empty($unconfirmed_dates)): ?>
+  <div class="oshirase-wrap">
+    <div class="oshirase-title">📢 お知らせ</div>
+    <div class="oshirase-item warn">
+      <div class="oshirase-icon">⚠️</div>
+      <div>
+        <div class="oshirase-head">売上日報入力未確定</div>
+        <div class="oshirase-dates">
+          <?php foreach ($unconfirmed_dates as $item): ?>
+            <a href="daily_report_entry.php?date=<?= urlencode($item['fm']) ?>"
+               class="date-chip">
+              <?= htmlspecialchars($item['jp']) ?>
+            </a>
+          <?php endforeach; ?>
+        </div>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- プリンター設定 -->
   <div style="margin-top:1.4em; text-align:center;">

@@ -205,7 +205,7 @@ include __DIR__ . '/header.php';
       <span class="label">合　計</span>
       <div>
         <span class="amount">¥<?= number_format($total) ?></span>
-        <span class="tax">（税込）</span>
+        <span class="tax">（本体価格）</span>
       </div>
     </div>
 

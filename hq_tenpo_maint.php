@@ -268,7 +268,13 @@ include __DIR__ . '/hq_header.php';
         ?>
         <tr class="data-row <?= $row_class ?>" data-rid="<?= (int)$rid ?>">
             <td style="text-align:center; font-weight:bold;"><?= htmlspecialchars($tenpo_no) ?></td>
-            <td><?= htmlspecialchars($tenpo_mei) ?></td>
+            <td>
+                <?php if ($is_heiten): ?>
+                    <span style="color:#c62828;font-weight:bold;">★ <?= htmlspecialchars($tenpo_mei) ?></span>
+                <?php else: ?>
+                    <?= htmlspecialchars($tenpo_mei) ?>
+                <?php endif; ?>
+            </td>
             <td style="text-align:center;">
                 <span class="badge-eigyo <?= $badge_class ?>">
                     <?= $eigyo !== '' ? htmlspecialchars($eigyo) : '未設定' ?>

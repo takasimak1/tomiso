@@ -1200,7 +1200,7 @@ function showReceipt(items, receiptNo, grandTotal, count) {
     html += '<span class="label">合　計</span>';
     html += '<div>';
     html += '<span class="amount">¥' + grandTotal.toLocaleString() + '</span>';
-    html += '<span class="tax">（税込）</span>';
+    html += '<span class="tax">（本体価格）</span>';
     html += '</div></div>';
 
     html += '<div class="rcpt-footer-msg">ありがとうございました</div>';

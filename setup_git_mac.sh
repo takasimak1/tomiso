@@ -1,85 +1,82 @@
 #!/bin/bash
 # =====================================================================
-# setup_git_mac.sh  ととレジ — GitHub セットアップ
-# Mac ターミナルで tomiso/ ディレクトリに移動して実行してください
+# setup_git_mac.sh  ととレジ — GitHub 初回セットアップ
+#
+# 【実行方法】Mac ターミナルで tomiso/ に移動してから実行
+#   cd ~/Documents/Claude/Projects/富惣/FileMakerDataAPI/富惣_FileMakerDataAPI/tomiso
+#   bash setup_git_mac.sh
+#
+# ★ 初回のみ実行してください（2回目以降は git add/commit/push を使う）
 # =====================================================================
-set -e
+GITHUB_USER="takasimak1"
+REPO_NAME="tomiso"
 
 echo "=== ととレジ GitHub セットアップ ==="
 echo ""
 
-# ── リポジトリ名（変更可）──
-REPO_NAME="tomiso"
-GITHUB_USER="takasimak1"
-
-# ── git 初期化 ──
-echo "[1/5] git init ..."
+# ──────────────────────────────────────────
+# [1/4] git 初期化（済みの場合はスキップ）
+# ──────────────────────────────────────────
+echo "[1/4] git init..."
 git init
 git config user.email "takasima.k1@gmail.com"
-git config user.name "takasimak1"
-git branch -M main
+git config user.name  "takasimak1"
+git branch -M main 2>/dev/null || git checkout -b main 2>/dev/null || true
 
-# ── ステージ（機密除外） ──
-echo "[2/5] ファイルをステージ中..."
-git add \
-    .gitignore \
-    README.md \
-    SPEC.md \
-    fm_config_secret.php.example \
-    fm_setting.php \
-    header.php \
-    footer.php \
-    hq_header.php \
-    hq_jikanbetsu.php \
-    hq_nyuryoku.php \
-    hq_seiseki.php \
-    hq_shohin_maint.php \
-    hq_store.php \
-    hq_tenpo_maint.php \
-    hq_top.php \
-    instore_codes.php \
-    login.php \
-    sales_confirm.php \
-    sales_edit.php \
-    sales_entry.php \
-    sales_list.php \
-    shohin_maint.php \
-    star_webprnt_inline.php \
-    top.php \
-    daily_report_entry.php \
-    daily_report_mystore.php \
-    JS/ \
-    src/
-
-# ── コミット ──
-echo "[3/5] 初回コミット..."
-git commit -m "Initial commit: ととレジ Web POS システム
-
-- POS レシート発行（JAN-13 インストアコード対応）
-- 部門別売上集計・昨対比
-- 本社：店舗マスター管理（営業状態・インストアコード）
-- ログイン（閉店店舗ブロック機能付き）
-- .gitignore で機密情報・非公開資料を除外
-- SPEC.md: オフラインキュー・脱FileMaker ロードマップを記載"
-
-# ── リモート追加 ──
-echo ""
-echo "[4/5] GitHub リモートを設定します"
-echo ""
-echo "  ★ 先に GitHub で空リポジトリを作成してください"
-echo "    https://github.com/new"
-echo "    ・Repository name: ${REPO_NAME}"
-echo "    ・Public または Private"
-echo "    ・README は追加しない（ここで作成済み）"
-echo ""
-read -p "    作成したら Enter キーを押してください..."
-
-git remote add origin "https://github.com/${GITHUB_USER}/${REPO_NAME}.git"
-
-# ── Push ──
-echo "[5/5] GitHub へ push..."
-git push -u origin main
+# ──────────────────────────────────────────
+# [2/4] ステージ（.gitignore が機密を自動除外）
+# ──────────────────────────────────────────
+echo "[2/4] ファイルをステージ中（.gitignore で機密を自動除外）..."
+git add .
 
 echo ""
-echo "✅ 完了しました！"
+echo "  ▼ ステージされるファイル:"
+git status --short
+echo ""
+echo "  ★ fm_config_secret.php が含まれていないことを確認してください"
+echo ""
+read -p "  問題なければ Enter を押してください..."
+
+# ──────────────────────────────────────────
+# [3/4] コミット
+# ──────────────────────────────────────────
+echo "[3/4] コミット..."
+git commit -m "initial commit: ととレジ Web POS v0.9
+
+- POS 売上登録（JAN-13 インストアコード・StarWebPRNT 印刷）
+- 売上日報 入力・確定
+- 本社：投入確認・昨対ランキング・店舗マスター管理・時間帯別
+- 店舗トップ：お知らせ（未確定日報の自動表示）
+- .gitignore で fm_config_secret.php を除外済み" || echo "  （変更なし or コミット済み — スキップ）"
+
+# ──────────────────────────────────────────
+# [4/4] リモート登録 → Push
+# ──────────────────────────────────────────
+echo "[4/4] GitHub へ push..."
+
+# すでに origin が登録されている場合は URL を更新
+if git remote get-url origin >/dev/null 2>&1; then
+    echo "  origin は設定済みです。URL を確認します..."
+    git remote set-url origin "https://github.com/${GITHUB_USER}/${REPO_NAME}.git"
+else
+    git remote add origin "https://github.com/${GITHUB_USER}/${REPO_NAME}.git"
+fi
+
+# GitHub 側に既存コミットがある場合は --allow-unrelated-histories で merge してから push
+if git ls-remote --exit-code origin main >/dev/null 2>&1; then
+    echo "  GitHub 側に既存コミットがあります。ローカルを優先して上書きします..."
+    git push -u origin main --force
+else
+    git push -u origin main
+fi
+
+echo ""
+echo "✅ 完了！"
 echo "   https://github.com/${GITHUB_USER}/${REPO_NAME}"
+echo ""
+echo "  ─────────────────────────────────────"
+echo "  次回以降（ファイルを変更したら）:"
+echo "    git add -A"
+echo "    git commit -m '変更内容のメモ'"
+echo "    git push"
+echo "  ─────────────────────────────────────"
