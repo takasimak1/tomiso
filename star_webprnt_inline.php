@@ -31,37 +31,25 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
     catOrder.forEach(function(bumon) {
         var bItems = groups[bumon];
         if (!bItems || !bItems.length) return;
-        var bTotal = bItems.reduce(function(s, it) { return s + it.subtotal; }, 0);
         var code   = barCodes ? (barCodes[bumon] || null) : null;
 
         req += b.createAlignmentElement({ position: 'left' });
         req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: '■ ' + bumon + '\n' });
         req += b.createTextElement({ emphasis: 'false' });
-        req += b.createTextElement({ codepage: 'utf8', data: '商品名  単価  数量  値引額  請求小計\n' });
         req += b.createRuledLineElement({ thickness: 'thin', width: 576 });
 
         bItems.forEach(function(it) {
-            var nebStr = '', nebAmt = 0;
+            var nebStr = '';
             if (it.nebiki_ritsu > 0) {
                 nebStr = ' (-' + it.nebiki_ritsu + '%)';
-                nebAmt = it.nebiki_gaku || Math.round((it.price || 0) * it.nebiki_ritsu / 100);
             } else if (it.nebiki_gaku > 0) {
                 nebStr = ' (-\xa5' + it.nebiki_gaku.toLocaleString() + ')';
-                nebAmt = it.nebiki_gaku;
             }
             req += b.createAlignmentElement({ position: 'left' });
-            req += b.createTextElement({ codepage: 'utf8', data: it.name + nebStr + '  \xd7' + it.qty + '\n' });
+            req += b.createTextElement({ codepage: 'utf8', data: it.name + nebStr + '\n' });
             req += b.createAlignmentElement({ position: 'right' });
             req += b.createTextElement({ codepage: 'utf8', data: '\xa5' + it.subtotal.toLocaleString() + '\n' });
-            var det = '  単価:\xa5' + (it.price || 0).toLocaleString();
-            det += '  値引額:' + (nebAmt > 0 ? '\xa5' + nebAmt.toLocaleString() : '-');
-            req += b.createAlignmentElement({ position: 'left' });
-            req += b.createTextElement({ codepage: 'utf8', data: det + '\n' });
         });
-
-        req += b.createAlignmentElement({ position: 'right' });
-        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: bumon + '小計  \xa5' + bTotal.toLocaleString() + '\n' });
-        req += b.createTextElement({ emphasis: 'false' });
 
         if (code) {
             req += b.createAlignmentElement({ position: 'center' });
