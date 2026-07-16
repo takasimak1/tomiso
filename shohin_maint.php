@@ -10,11 +10,13 @@ if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/bumon_master.php';
 
 $store_id   = $_SESSION['store_id'];
 $store_name = $_SESSION['store_name'];
 
-$bumon_master = ['魚', '天ぷら', '冷惣菜', 'いか焼', '唐揚', 'レジ袋'];
+// 部門定義（bumon_API から取得。並び順昇順）
+$bumon_master = bumon_names(fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass));
 
 /* =====================================================================
    AJAX ハンドラー（POST）— getRecord を使わず、ポジションは呼び出し元が渡す

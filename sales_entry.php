@@ -12,6 +12,7 @@ if (!isset($_SESSION['store_id'])) { header('Location: login.php'); exit(); }
 if (($_SESSION['role'] ?? '') === 'hq') { header('Location: hq_top.php'); exit(); }
 require_once __DIR__ . '/src/fmRESTor.php';
 require_once __DIR__ . '/fm_setting.php';
+require_once __DIR__ . '/bumon_master.php';
 require_once __DIR__ . '/instore_codes.php';
 
 $store_id   = $_SESSION['store_id'];
@@ -26,26 +27,24 @@ $today      = date('m/d/Y');
 // フォーマット: 店舗部門コード(7桁) + 金額(5桁) + CD(1桁) = 13桁
 // 7桁コードの例: 魚=2004355, 天ぷら=2004354 など
 // フィールド型: テキスト（バーコード生成で文字列連結するため）
+//
+// 部門定義は bumon_API（部門マスタ）から取得する（bumon_master.php）
 // =====================================================================
+
+// 部門マスタ（並び順昇順）
+$bumon_master   = fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass);
+$category_order = bumon_names($bumon_master);
 
 /** FM account_API からインストアコード7桁を取得 */
 function _fetch_instore_codes_from_fm(string $store_id, string $host, string $db,
                                        string $layout_account,
-                                       string $api_master_user, string $api_master_pass): array {
-    // 部門名 → FM フィールド名 の対応
-    $dept_fields = [
-        '魚'     => 'インストアコード_魚',
-        '天ぷら' => 'インストアコード_天ぷら',
-        '惣菜'   => 'インストアコード_惣菜',
-        'イカ焼' => 'インストアコード_イカ焼',
-        '唐揚'   => 'インストアコード_唐揚',
-        'レジ袋' => 'インストアコード_レジ袋',
-    ];
+                                       string $api_master_user, string $api_master_pass,
+                                       array $dept_fields): array {
     try {
         $fm = new \fmRESTor\fmRESTor($host, $db, $layout_account,
                                       $api_master_user, $api_master_pass,
                                       ['allowInsecure' => true]);
-        $res = $fm->findRecord([['店舗Ｎｏ' => $store_id]]);
+        $res = $fm->findRecords(['query' => [['店舗Ｎｏ' => $store_id]]]);
         $fd  = $res['result']['response']['data'][0]['fieldData'] ?? [];
         $codes = [];
         foreach ($dept_fields as $cat => $field) {
@@ -60,7 +59,8 @@ function _fetch_instore_codes_from_fm(string $store_id, string $host, string $db
 
 // FM から取得（フィールド未設定店舗は空配列が返る）
 $ic_dept_fm = _fetch_instore_codes_from_fm(
-    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass
+    $store_id, $host, $db, $layout_account, $api_master_user, $api_master_pass,
+    bumon_ic_field_map($bumon_master)
 );
 
 // フォールバック: instore_codes.php の静的設定（FM 移行完了後は削除可）
@@ -184,8 +184,7 @@ $category_map = [
     '南蛮漬'  => '惣菜',
     '唐揚'    => '唐揚',
 ];
-// 表示順（この順番でタブを並べる）
-$category_order = ['魚', '天ぷら', '惣菜', 'イカ焼', '唐揚'];
+// 表示順は bumon_master.php で取得済みの $category_order（bumon_API 並び順）を使用
 
 $fm2  = new fmRESTor($host, $db, $layout_hanbai, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
 // 全件取得 → PHP で自店舗・発売中 を絞り込む（shohin_maint.php と同方式）
@@ -1125,8 +1124,8 @@ function showReceipt(items, receiptNo, grandTotal, count) {
         groups[b].push(it);
     });
 
-    /* 表示順をカテゴリー順に並べ替え */
-    const catOrder = ['魚','天ぷら','惣菜','唐揚'];
+    /* 表示順をカテゴリー順に並べ替え（bumon_API 並び順） */
+    const catOrder = <?= json_encode($category_order, JSON_UNESCAPED_UNICODE) ?>;
     order.sort(function(a,b) {
         var ia = catOrder.indexOf(a); if (ia < 0) ia = 99;
         var ib = catOrder.indexOf(b); if (ib < 0) ib = 99;
