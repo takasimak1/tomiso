@@ -271,7 +271,7 @@ include __DIR__ . '/header.php';
   <div class="nav-buttons">
     <a href="sales_entry.php" class="nav-btn primary">
       <span class="nav-icon">＋</span>
-      売上登録
+      レジ
     </a>
     <a href="sales_list.php" class="nav-btn">
       <span class="nav-icon">≡</span>

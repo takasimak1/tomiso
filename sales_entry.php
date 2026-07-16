@@ -473,6 +473,9 @@ body { overflow: hidden; margin: 0; padding: 0; }
     border: 1.5px solid #e53935;
     white-space: nowrap;
     transition: all .1s;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 .clear-cart-btn:hover { background: #e53935; color: #fff; }
 /* カートフッター */
@@ -498,6 +501,9 @@ body { overflow: hidden; margin: 0; padding: 0; }
     cursor: pointer;
     white-space: nowrap;
     transition: background .15s;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 .register-btn:hover { background: #00695c; }
 .register-btn:disabled { background: #bbb; cursor: not-allowed; }
@@ -672,12 +678,6 @@ body { overflow: hidden; margin: 0; padding: 0; }
     font-weight: bold; cursor: pointer;
 }
 .rcpt-btn-print:hover { background: #0d47a1; }
-.rcpt-btn-next {
-    flex: 1; background: #004d40; color: #fff; border: none;
-    border-radius: 0.5em; padding: 0.7em; font-size: 1em;
-    font-weight: bold; cursor: pointer;
-}
-.rcpt-btn-next:hover { background: #00695c; }
 
 /* ===================== タブレット向け最適化（768px以上） ===================== */
 /* スマホでは使用しない想定。縦1列・カート下固定レイアウトを維持しつつ拡大。 */
@@ -1234,7 +1234,6 @@ function showReceipt(items, receiptNo, grandTotal, count) {
     /* ボタン */
     html += '<div class="rcpt-buttons">';
     html += '<button class="rcpt-btn-print" id="rcpt-print-btn">🖨 印刷</button>';
-    html += '<button class="rcpt-btn-next" id="rcpt-close">次のお客様へ →</button>';
     html += '</div>';
 
     inner.innerHTML = html;
@@ -1257,13 +1256,9 @@ function showReceipt(items, receiptNo, grandTotal, count) {
         } catch(e) { console.warn('Barcode error for ' + bumon + ':', e); }
     });
 
-    /* 印刷ボタン */
+    /* 印刷ボタン（印刷実行後、レシートを閉じて売上登録画面に戻る＝次のお客様の入力へ） */
     document.getElementById('rcpt-print-btn').addEventListener('click', function() {
         starPrintReceipt(this);
-    });
-
-    /* 閉じるボタン */
-    document.getElementById('rcpt-close').addEventListener('click', function() {
         overlay.classList.remove('show');
     });
 }
