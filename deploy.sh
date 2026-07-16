@@ -25,6 +25,7 @@ rsync -avz --dry-run --delete \
   --exclude='deploy.sh' \
   --exclude='README.md' \
   --exclude='SPEC.md' \
+  --exclude='docs/' \
   --exclude='sales_queue_data/' \
   --exclude='*_debug.php' \
   --exclude='star_debug_log.php' \
@@ -52,6 +53,7 @@ rsync -avz --delete \
   --exclude='deploy.sh' \
   --exclude='README.md' \
   --exclude='SPEC.md' \
+  --exclude='docs/' \
   --exclude='sales_queue_data/' \
   --exclude='*_debug.php' \
   --exclude='star_debug_log.php' \
