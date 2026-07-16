@@ -767,6 +767,37 @@ body { overflow: hidden; margin: 0; padding: 0; }
 /* カートパネルヘッダーは非表示（縦1列レイアウトでは不要） */
 .cart-panel-header { display: none; }
 
+/* ===================== 横向きタブレット：左に商品・右にカート（全高） ===================== */
+@media (orientation: landscape) {
+    .pos-wrap {
+        grid-template-columns: 1.7fr 1fr;
+        grid-template-rows: auto 1fr;
+        grid-template-areas:
+            "tabs   cart"
+            "shohin cart";
+    }
+    .pos-bumon  { grid-area: tabs; }
+    .pos-shohin { grid-area: shohin; }
+    .pos-cart {
+        grid-area: cart;
+        height: 100%;
+        max-height: none;
+        border-top: none;
+        border-left: 2px solid #004d40;
+        box-shadow: -2px 0 8px rgba(0,0,0,.1);
+    }
+    .cart-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.6em 0.8em;
+        background: #004d40;
+        color: #fff;
+        font-weight: bold;
+        font-size: 0.95em;
+    }
+}
+
 /* ===================== 印刷用 CSS ===================== */
 @media print {
     /* POS画面・ナビ・フッター非表示 */
