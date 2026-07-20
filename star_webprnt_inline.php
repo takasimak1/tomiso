@@ -10,8 +10,8 @@ function isStarWebPRNTBrowser() {
     return /StarWebPRNT/i.test(navigator.userAgent);
 }
 
-/* 半角=1・全角=2として表示幅を計算（TSP100IV Font A: 576dot / 12dot = 半角48文字） */
-var RECEIPT_LINE_WIDTH = 48;
+/* 半角=1・全角=2として表示幅を計算（実機テスト印刷で確認した実測値: 半角46文字） */
+var RECEIPT_LINE_WIDTH = 46;
 function _receiptStrWidth(s) {
     var w = 0;
     for (var i = 0; i < s.length; i++) {
