@@ -10,6 +10,24 @@ function isStarWebPRNTBrowser() {
     return /StarWebPRNT/i.test(navigator.userAgent);
 }
 
+/* 半角=1・全角=2として表示幅を計算（TSP100IV Font A: 576dot / 12dot = 半角48文字） */
+var RECEIPT_LINE_WIDTH = 48;
+function _receiptStrWidth(s) {
+    var w = 0;
+    for (var i = 0; i < s.length; i++) {
+        w += (s.charCodeAt(i) > 0xFF) ? 2 : 1;
+    }
+    return w;
+}
+/* 「■ 部門名」を左、「¥部門小計」を右にスペースで詰めて1行にする */
+function _bumonHeaderLine(bumon, bTotal) {
+    var left  = '■ ' + bumon;
+    var right = '\xa5' + bTotal.toLocaleString();
+    var pad   = RECEIPT_LINE_WIDTH - _receiptStrWidth(left) - _receiptStrWidth(right);
+    if (pad < 1) pad = 1;
+    return left + new Array(pad + 1).join(' ') + right;
+}
+
 function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, grandTotal, isKakunin, barCodes, count) {
     var b   = new StarWebPrintBuilder();
     var req = '';
@@ -31,10 +49,11 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
     catOrder.forEach(function(bumon) {
         var bItems = groups[bumon];
         if (!bItems || !bItems.length) return;
+        var bTotal = bItems.reduce(function(s, it) { return s + it.subtotal; }, 0);
         var code   = barCodes ? (barCodes[bumon] || null) : null;
 
         req += b.createAlignmentElement({ position: 'left' });
-        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: '■ ' + bumon + '\n' });
+        req += b.createTextElement({ codepage: 'utf8', emphasis: 'true', data: _bumonHeaderLine(bumon, bTotal) + '\n' });
         req += b.createTextElement({ emphasis: 'false' });
         req += b.createRuledLineElement({ thickness: 'thin', width: 576 });
 
@@ -53,7 +72,7 @@ function buildStarReceiptXml(storeName, dateStr, receiptNo, groups, catOrder, gr
 
         if (code) {
             req += b.createAlignmentElement({ position: 'center' });
-            try { req += b.createBarcodeElement({ symbology: 'JAN13', width: 'width2', hri: 'true', height: 60, data: code }); } catch(e) {}
+            try { req += b.createBarcodeElement({ symbology: 'JAN13', width: 'width3', hri: 'true', height: 60, data: code }); } catch(e) {}
             req += b.createFeedElement({ line: 1 });
         }
         req += b.createRuledLineElement({ thickness: 'medium', width: 576 });
