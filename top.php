@@ -281,6 +281,10 @@ include __DIR__ . '/header.php';
       <span class="nav-icon">📋</span>
       売上日報入力
     </a>
+    <a href="haiki_entry.php" class="nav-btn">
+      <span class="nav-icon">🗑</span>
+      廃棄数入力
+    </a>
     <a href="daily_report_mystore.php" class="nav-btn">
       <span class="nav-icon">📈</span>
       自店舗成績

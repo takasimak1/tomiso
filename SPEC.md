@@ -33,8 +33,9 @@ tomiso/
 ├── top.php                 # 店舗トップメニュー
 ├── sales_entry.php         # POS レシート入力・発行（★中核）
 ├── sales_confirm.php       # レシート訂正
-├── daily_report_entry.php  # 日報入力
+├── daily_report_entry.php  # 日報入力（ととレジ実績列あり）
 ├── daily_report_mystore.php# 店舗向け月次サマリー
+├── haiki_entry.php         # 廃棄数入力（商品単位・1日1回）
 ├── hq_top.php              # 本社メニュー
 ├── hq_seiseki.php          # 本社：店舗売上ランキング
 ├── hq_store.php            # 本社：店舗別日次推移
@@ -53,9 +54,10 @@ tomiso/
 | $layout_tenpo | tenpo_API | 店舗マスタ |
 | $layout_account | account_API | アカウント・インストアコード管理 |
 | $layout_pos | pos_API | POS 明細（売上登録） |
-| $layout_hanbai | hanbai_API | 販売商品マスタ |
+| $layout_hanbai | hanbai_API | 販売商品マスタ（`上代単価`フィールドあり） |
 | $layout_daily_report | daily_report_API | 売上日報 CRUD |
 | $layout_daily_report_sum | daily_report_sum_API | 日報集計・昨対 |
+| $layout_haiki | haiki_API | 廃棄日報（商品単位・1日1回入力） |
 
 ---
 
@@ -65,8 +67,9 @@ tomiso/
 - [x] POS レシート発行（部門別・値引き対応）
 - [x] インストアコード（JAN-13）バーコード生成・印刷
 - [x] Star Micronics プリンター対応（StarWebPRNT）
-- [x] 日報入力（部門別売上）
+- [x] 日報入力（部門別売上、ととレジ実績との自動突合表示）
 - [x] 月次売上サマリー表示（部門別・昨対）
+- [x] 廃棄数入力（商品単位・1日1回）
 
 ### 本社機能
 - [x] 店舗売上ランキング（当月累計・昨対）
@@ -74,6 +77,7 @@ tomiso/
 - [x] 時間帯別集計
 - [x] 商品マスターメンテ（取扱店舗・セール設定）
 - [x] 店舗マスターメンテ（営業状態・閉店日・インストアコード）
+- [ ] 単品管理ダッシュボード（商品別・部門別・店舗別の定価/値引/廃棄/上代達成率、実装中）
 
 ---
 

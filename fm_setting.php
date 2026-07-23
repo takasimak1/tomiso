@@ -15,8 +15,9 @@ $layout_account = 'account_API';      // Webユーザー管理（将来用）
 
 // ■ 店舗POS（販売商品テーブル 46件）
 $layout_pos     = 'pos_API';          // 店舗売上明細（売上登録・参照）
-$layout_hanbai  = 'hanbai_API';       // 販売商品（POS商品一覧 ※46件）
+$layout_hanbai  = 'hanbai_API';       // 販売商品（POS商品一覧 ※46件。上代単価フィールドあり）
 $layout_bumon   = 'bumon_API';        // 部門マスタ（部門名・並び順。インストアコード部門定義の元）
+$layout_haiki   = 'haiki_API';        // 廃棄日報（商品単位・1日1回入力）
 
 // ■ 発注・受注（工場向け）
 $layout_product = 'product_API';      // 商品マスタ（発注用 ※12,403件）
@@ -33,6 +34,7 @@ $layout_daily_report_sum = 'daily_report_sum_API';  // _24_売上日報（集計
 //   pos_API              → 店舗売上明細
 //   hanbai_API           → 販売商品
 //   bumon_API            → 部門マスタ（部門CD/部門名/並び順）
+//   haiki_API            → _25_廃棄日報（fk_店舗No/店舗名/売上日/商品名/廃棄数）
 //   product_API          → 商品マスタ
 //   daily_report_API     → _24_売上日報（全フィールド配置）
 //   daily_report_sum_API → _24_売上日報（週番号・曜日・年 の計算フィールドを必ず配置）
