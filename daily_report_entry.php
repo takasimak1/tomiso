@@ -109,6 +109,22 @@ if (($qr2['result']['messages'][0]['code'] ?? '0') !== '401') {
     if ($rec2) $py_fd = $rec2['fieldData'];
 }
 
+// ---- ととレジ実績（pos_API 明細から時刻カットオフ集計、参照専用） ----
+$fmPos = new fmRESTor($host, $db, $layout_pos,
+                      $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+$qrPos = $fmPos->findRecords([
+    'query' => [['店舗No' => $store_id, '販売日時' => $target_date_fm]],
+    'limit' => 2000,
+]);
+$pos_records = (($qrPos['result']['messages'][0]['code'] ?? '0') !== '401')
+    ? ($qrPos['result']['response']['data'] ?? [])
+    : [];
+
+$tr_12  = totoregiAgg($pos_records, '12:00:00');
+$tr_15  = totoregiAgg($pos_records, '15:00:00');
+$tr_17  = totoregiAgg($pos_records, '17:00:00');
+$tr_all = totoregiAgg($pos_records, null);
+
 // ---- POST 処理 ----
 $success_msg = '';
 
@@ -230,6 +246,34 @@ function py(array $py_fd, string $key): string {
     return $v > 0 ? number_format($v) : '―';
 }
 
+/**
+ * pos_API 明細を「作成情報タイムスタンプ」で時刻カットオフ集計する。
+ * $cutoff_hm = 'HH:MM:SS' 形式。null なら全日（カットオフなし）。
+ * 客数はレシート番号（伝票単位）の distinct 件数、累計売上は販売金額の合計。
+ */
+function totoregiAgg(array $pos_records, ?string $cutoff_hm): array {
+    $receipts = [];
+    $sum = 0;
+    foreach ($pos_records as $row) {
+        $f  = $row['fieldData'];
+        $ts = $f['作成情報タイムスタンプ'] ?? '';
+        if ($cutoff_hm !== null) {
+            $dt = \DateTime::createFromFormat('m/d/Y H:i:s', $ts);
+            if (!$dt || $dt->format('H:i:s') > $cutoff_hm) continue;
+        }
+        $rno = trim((string)($f['レシート番号'] ?? ''));
+        if ($rno !== '') $receipts[$rno] = true;
+        $sum += (int)($f['販売金額'] ?? 0);
+    }
+    return ['count' => count($receipts), 'sum' => $sum];
+}
+function trCount(array $tr): string {
+    return $tr['count'] > 0 ? '<span class="tr-val">' . number_format($tr['count']) . '</span>件' : '<span class="tr-none">―</span>';
+}
+function trSum(array $tr): string {
+    return $tr['sum'] > 0 ? '<span class="tr-val">¥' . number_format($tr['sum']) . '</span>' : '<span class="tr-none">―</span>';
+}
+
 // 当年・前年 部門合計
 function bushoGoukei(array $fd, array $keys): int {
     return array_sum(array_map(fn($k) => (int)($fd[$k] ?? 0), $keys));
@@ -293,12 +337,12 @@ include __DIR__ . '/header.php';
 }
 .dr-section-body { padding: 0.7em 0.9em; }
 
-/* 比較グリッド（ラベル | 入力 | 前年） */
+/* 比較グリッド（ラベル | 入力 | ととレジ実績 | 前年） */
 .cmp-grid {
     display: grid;
-    grid-template-columns: 5em 1fr 5.5em;
+    grid-template-columns: 4em 1fr 4.5em 4.5em;
     align-items: center;
-    gap: 0.4em 0.5em;
+    gap: 0.4em 0.4em;
     margin-bottom: 0.3em;
 }
 .cmp-label {
@@ -346,11 +390,21 @@ include __DIR__ . '/header.php';
 .cmp-py .py-val { font-weight: bold; color: #1565c0; }
 .cmp-py .py-none { color: #ccc; }
 
-/* 前年ヘッダー行 */
+/* ととレジ実績（参照専用・pos_API集計） */
+.cmp-tr {
+    font-size: 0.88em;
+    text-align: right;
+    color: #2e7d32;
+    white-space: nowrap;
+}
+.cmp-tr .tr-val { font-weight: bold; color: #2e7d32; }
+.cmp-tr .tr-none { color: #ccc; }
+
+/* ヘッダー行 */
 .cmp-header {
     display: grid;
-    grid-template-columns: 5em 1fr 5.5em;
-    gap: 0.4em 0.5em;
+    grid-template-columns: 4em 1fr 4.5em 4.5em;
+    gap: 0.4em 0.4em;
     margin-bottom: 0.1em;
 }
 .cmp-header span {
@@ -362,16 +416,18 @@ include __DIR__ . '/header.php';
 
 /* 合計行 */
 .total-bar {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 4em 1fr 4.5em 4.5em;
     align-items: center;
+    gap: 0.4em 0.4em;
     padding: 0.4em 0 0;
     border-top: 2px solid #004d40;
     margin-top: 0.5em;
 }
 .total-bar .t-label { font-size: 0.85em; font-weight: bold; color: #004d40; }
 .total-bar .t-this  { font-size: 1.25em; font-weight: bold; color: #004d40; }
-.total-bar .t-py    { font-size: 0.88em; color: #1565c0; font-weight: bold; text-align: right; }
+.total-bar .t-tr    { font-size: 0.88em; color: #2e7d32; font-weight: bold; text-align: right; white-space: nowrap; }
+.total-bar .t-py    { font-size: 0.88em; color: #1565c0; font-weight: bold; text-align: right; white-space: nowrap; }
 
 /* 保存ボタン */
 .save-btn {
@@ -594,12 +650,22 @@ include __DIR__ . '/header.php';
       <li>前年データは参照のみで、編集はできません。</li>
     </ul>
   </div>
+  <!-- ととレジ実績 仕様注意書き -->
+  <div class="spec-note" style="margin-bottom:0.6em;">
+    <div class="spec-note-title">ℹ ととレジ実績（緑色の列）について</div>
+    <ul>
+      <li>ととレジで登録された実際の売上を、その時刻までの分だけ自動集計して表示しています（参照のみ・保存はされません）。</li>
+      <li>客数はレシート枚数（会計回数）です。</li>
+      <li>本日分は表示のたびにリアルタイムで再集計されます。</li>
+    </ul>
+  </div>
 
   <?php
   // 比較ヘッダー行（共通）
   $cmp_header = '<div class="cmp-header">
       <span></span>
       <span class="h-input">本　年</span>
+      <span>ととレジ</span>
       <span>前年同曜日</span>
   </div>';
 
@@ -607,7 +673,7 @@ include __DIR__ . '/header.php';
   function timeSec(string $id, string $label, string $action,
                    string $field_kyaku, string $field_uriage,
                    array $fd, array $py_fd, bool $is_kakutei,
-                   string $cmp_header): void {
+                   string $cmp_header, array $tr): void {
       $done = (int)($fd[$field_kyaku] ?? 0) > 0;
       echo '<div class="dr-section">';
       echo '<div class="dr-section-head">' . $label;
@@ -623,6 +689,7 @@ include __DIR__ . '/header.php';
       echo '<div class="cmp-grid">';
       echo '<span class="cmp-label">客　数</span>';
       echo '<div><input class="cmp-input" type="number" name="' . $field_kyaku . '" inputmode="numeric" value="' . fv($fd, $field_kyaku) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">人</span></div>';
+      echo '<div class="cmp-tr">' . trCount($tr) . '</div>';
       echo '<div class="cmp-py">' . ($pyv_k > 0 ? '<span class="py-val">' . number_format($pyv_k) . '</span> 人' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
 
@@ -631,6 +698,7 @@ include __DIR__ . '/header.php';
       echo '<div class="cmp-grid">';
       echo '<span class="cmp-label">累計売上</span>';
       echo '<div><input class="cmp-input" type="number" name="' . $field_uriage . '" inputmode="numeric" value="' . fv($fd, $field_uriage) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">円</span></div>';
+      echo '<div class="cmp-tr">' . trSum($tr) . '</div>';
       echo '<div class="cmp-py">' . ($pyv_u > 0 ? '<span class="py-val">¥' . number_format($pyv_u) . '</span>' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
 
@@ -644,15 +712,15 @@ include __DIR__ . '/header.php';
 
   <!-- 12時 -->
   <?php timeSec('j12', '🕛 12時', 'save_12',
-      '客数_12時', '売上累計_12時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header); ?>
+      '客数_12時', '売上累計_12時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header, $tr_12); ?>
 
   <!-- 15時 -->
   <?php timeSec('j15', '🕒 15時', 'save_15',
-      '客数_15時', '売上累計_15時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header); ?>
+      '客数_15時', '売上累計_15時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header, $tr_15); ?>
 
   <!-- 17時 -->
   <?php timeSec('j17', '🕔 17時', 'save_17',
-      '客数_17時', '売上累計_17時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header); ?>
+      '客数_17時', '売上累計_17時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header, $tr_17); ?>
 
   <!-- 閉店後 -->
   <div class="dr-section">
@@ -697,8 +765,14 @@ include __DIR__ . '/header.php';
       <form method="post" id="form-heiten">
         <input type="hidden" name="action" id="heiten-action" value="save_heiten">
 
-        <!-- 部門一覧 -->
-        <?= $cmp_header ?>
+        <!-- 部門一覧（部門別のととレジ実績は対象外のため列は空欄） -->
+        <?php $cmp_header_bumon = '<div class="cmp-header">
+            <span></span>
+            <span class="h-input">本　年</span>
+            <span></span>
+            <span>前年同曜日</span>
+        </div>'; ?>
+        <?= $cmp_header_bumon ?>
         <?php foreach ($all_busho as $field => $label): ?>
         <?php $pyv = (int)($py_fd[$field] ?? 0); ?>
         <div class="cmp-grid busho-cmp" data-field="<?= $field ?>">
@@ -721,6 +795,7 @@ include __DIR__ . '/header.php';
           <span class="t-this" id="busho-goukei">
             <?= $goukei_fm > 0 ? '¥' . number_format($goukei_fm) : '―' ?>
           </span>
+          <span class="t-tr"><?= trSum($tr_all) ?></span>
           <span class="t-py">
             <?= $goukei_py_fm > 0 ? '前年 ¥' . number_format($goukei_py_fm) : '' ?>
           </span>
@@ -738,6 +813,7 @@ include __DIR__ . '/header.php';
                      <?= ($is_kakutei || $is_future_page) ? 'disabled' : '' ?> min="0">
               <span class="cmp-unit">人</span>
             </div>
+            <div class="cmp-tr"><?= trCount($tr_all) ?></div>
             <div class="cmp-py">
               <?= $pyv_k > 0 ? '<span class="py-val">' . number_format($pyv_k) . '</span> 人' : '<span class="py-none">―</span>' ?>
             </div>
