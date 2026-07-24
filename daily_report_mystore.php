@@ -296,6 +296,7 @@ include __DIR__ . '/header.php';
 .up   { color: #2e7d32; font-weight: bold; }
 .down { color: #c62828; font-weight: bold; }
 .even { color: #888; }
+.mikakunin { color: #e65100; font-weight: bold; }
 
 /* 合計行 */
 .day-table tr.total-row td {
@@ -524,6 +525,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
 
         $date_str  = date('n/j', $ts);
         $jotai_cls = $jotai !== null ? ($jotai_badge[$jotai] ?? 'secondary') : null;
+        $is_unconfirmed = ($f !== null && $jotai !== '確定');
 
         // 未来の日はグレーアウト
         $row_style = $is_future_day ? ' style="opacity:.5;"' : '';
@@ -535,6 +537,14 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
         </a>
       </td>
       <td class="<?= $dow_cls ?>"><?= $dow ?></td>
+      <?php if ($is_unconfirmed): ?>
+      <td class="right mikakunin">未確定</td>
+      <td class="right mikakunin">未確定</td>
+      <td class="right" style="color:#999; font-size:.9em;">
+        <?= $prev_uriage > 0 ? '¥' . number_format($prev_uriage) : '<span style="color:#ddd;">―</span>' ?>
+      </td>
+      <td class="right mikakunin">未確定</td>
+      <?php else: ?>
       <td class="right">
         <?= $this_uriage > 0 ? '¥' . number_format($this_uriage) : '<span style="color:#ccc;">―</span>' ?>
       </td>
@@ -547,6 +557,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       <td class="right <?= $sk_cls ?>">
         <?= $sakutai_pct !== null ? $sakutai_pct . '%' : '<span style="color:#ddd;">―</span>' ?>
       </td>
+      <?php endif; ?>
       <td>
         <?php if ($jotai_cls !== null): ?>
           <span class="badge bg-<?= $jotai_cls ?>" style="font-size:.72em;"><?= htmlspecialchars($jotai) ?></span>
@@ -554,8 +565,8 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       </td>
     </tr>
     <?php
-    // --- 部門別サブ行（当年データがある日のみ） ---
-    if ($f && !empty($active_busho)):
+    // --- 部門別サブ行（当年データが確定している日のみ） ---
+    if ($f && !$is_unconfirmed && !empty($active_busho)):
         $day_active = [];
         foreach ($active_busho as $field => $label) {
             $dcy = (int)($f[$field] ?? 0);

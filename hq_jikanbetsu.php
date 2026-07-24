@@ -67,6 +67,7 @@ for ($d = 1; $d <= $days_in_month; $d++) {
         'kareisan'     => 0,
         'kareihaki'    => 0,
         'stores'       => 0,
+        'confirmed'    => 0,
     ];
 }
 
@@ -89,6 +90,7 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
         $daily[$day]['kareisan']     += (int)($f['からすかれい_製造数'] ?? 0);
         $daily[$day]['kareihaki']    += (int)($f['からすかれい_廃棄数'] ?? 0);
         $daily[$day]['stores']++;
+        if (trim($f['入力状態'] ?? '') === '確定') $daily[$day]['confirmed']++;
     }
 }
 
@@ -120,6 +122,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             fputcsv($out, [
                 $sel_month . '/' . $d, $row['dow'],
                 '', '', '', '', '', '', '', '', '', '', ''
+            ]);
+        } elseif ($row['confirmed'] < $row['stores']) {
+            fputcsv($out, [
+                $sel_month . '/' . $d, $row['dow'],
+                '未確定', '未確定', '未確定', '未確定', '未確定', '未確定',
+                '未確定', '未確定', '未確定', '未確定', $row['stores'],
             ]);
         } else {
             fputcsv($out, [
@@ -215,6 +223,7 @@ table.jk-table td.dow-col {
 table.jk-table td.dow-sun { color: #c62828; font-weight: bold; }
 table.jk-table td.dow-sat { color: #1565c0; font-weight: bold; }
 table.jk-table td.empty { color: #bbb; text-align: center; }
+table.jk-table td.mikakunin-cell { color: #e65100; font-weight: bold; text-align: center; }
 
 table.jk-table tbody tr:hover td { background: #f3f4fb; }
 table.jk-table .today-row td { background: #fff9c4 !important; }
@@ -286,13 +295,17 @@ table.jk-table tfoot td.date-col { text-align: center; }
           $dow_class = ($dow === '日') ? 'dow-sun' : (($dow === '土') ? 'dow-sat' : '');
           $is_today = ($d == $today_day);
           $has_data = ($row['stores'] > 0);
+          $is_unconfirmed = ($has_data && $row['confirmed'] < $row['stores']);
         ?>
         <tr class="<?= $is_today ? 'today-row' : '' ?>">
           <td class="date-col">
             <?= $sel_month ?>/<?= $d ?>
           </td>
           <td class="dow-col <?= $dow_class ?>"><?= $dow ?></td>
-          <?php if ($has_data): ?>
+          <?php if ($is_unconfirmed): ?>
+            <td class="mikakunin-cell" colspan="10">未確定</td>
+            <td style="text-align:center;"><?= $row['stores'] ?></td>
+          <?php elseif ($has_data): ?>
             <td><?= number_format($row['kyaku_12']) ?></td>
             <td>¥<?= number_format($row['uriage_12']) ?></td>
             <td><?= number_format($row['kyaku_15']) ?></td>

@@ -193,15 +193,20 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
             $ratio  = ($py_s !== null && $py_s > 0) ? round($cy_s / $py_s * 100, 1) : '';
             $cy_sum_csv += $cy_s; $kyaku_sum_csv += $ky;
             if ($py_s !== null) $py_sum_csv += $py_s;
-            $row = [$sel_month . '/' . $d, $dow, $cy_s, ($py_s !== null ? $py_s : ''), $ratio, $ky, $status];
-            // 部門列を追加
-            foreach ($active_busho as $field => $_label) {
-                $dcy = (int)($cf[$field] ?? 0);
-                $dpy = ($pf !== null) ? (int)($pf[$field] ?? 0) : 0;
-                $dr  = ($dcy > 0 && $dpy > 0) ? round($dcy / $dpy * 100, 1) : '';
-                $row[] = $dcy > 0 ? $dcy : '';
-                $row[] = $dpy > 0 ? $dpy : '';
-                $row[] = $dr;
+            if ($status !== '確定') {
+                $row = [$sel_month . '/' . $d, $dow, '未確定', ($py_s !== null ? $py_s : ''), '未確定', '未確定', $status];
+                foreach ($active_busho as $_label2) { $row[] = '未確定'; $row[] = ''; $row[] = ''; }
+            } else {
+                $row = [$sel_month . '/' . $d, $dow, $cy_s, ($py_s !== null ? $py_s : ''), $ratio, $ky, $status];
+                // 部門列を追加
+                foreach ($active_busho as $field => $_label) {
+                    $dcy = (int)($cf[$field] ?? 0);
+                    $dpy = ($pf !== null) ? (int)($pf[$field] ?? 0) : 0;
+                    $dr  = ($dcy > 0 && $dpy > 0) ? round($dcy / $dpy * 100, 1) : '';
+                    $row[] = $dcy > 0 ? $dcy : '';
+                    $row[] = $dpy > 0 ? $dpy : '';
+                    $row[] = $dr;
+                }
             }
             fputcsv($out, $row);
         } else {
@@ -303,6 +308,7 @@ table.day-table .today-row td { background: #fff9c4 !important; }
 
 .ratio-high-cell { color: #2e7d32; font-weight: bold; }
 .ratio-low-cell  { color: #c62828; font-weight: bold; }
+.mikakunin-cell  { color: #e65100; font-weight: bold; }
 
 table.day-table tfoot td {
     background: #e8eaf6; font-weight: bold;
@@ -527,21 +533,24 @@ table.dept-table tfoot td.dept-name { text-align: left; }
               $ratio = ($py_s !== null && $py_s > 0 && $cy_s !== null)
                       ? round($cy_s / $py_s * 100, 1) : null;
               $r_class = ($ratio === null) ? '' : ($ratio >= 105 ? 'ratio-high-cell' : ($ratio < 95 ? 'ratio-low-cell' : ''));
+              $is_unconfirmed = ($cf !== null && $status !== '確定');
           ?>
           <tr class="<?= $is_today ? 'today-row' : '' ?>">
             <td class="date-col"><?= $sel_month ?>/<?= $d ?></td>
             <td class="dow-col <?= $dow_class ?>"><?= $dow ?></td>
-            <?php if ($cf !== null): ?>
+            <?php if ($is_unconfirmed): ?>
+              <td class="mikakunin-cell" style="text-align:center;">未確定</td>
+              <td style="color:#888;"><?= $py_s !== null ? '¥' . number_format($py_s) : '－' ?></td>
+              <td class="mikakunin-cell" style="text-align:center;">未確定</td>
+              <td class="mikakunin-cell" style="text-align:center;">未確定</td>
+              <td class="status-col"><span style="color:#e65100;">△</span></td>
+            <?php elseif ($cf !== null): ?>
               <td>¥<?= number_format($cy_s) ?></td>
               <td style="color:#888;"><?= $py_s !== null ? '¥' . number_format($py_s) : '－' ?></td>
               <td class="<?= $r_class ?>"><?= $ratio !== null ? $ratio . '%' : '－' ?></td>
               <td><?= number_format($ky) ?></td>
               <td class="status-col">
-                <?php
-                  if ($status === '確定')       echo '<span style="color:#2e7d32;">✅</span>';
-                  elseif ($status === '入力中') echo '<span style="color:#e65100;">△</span>';
-                  else                          echo '<span style="color:#bbb;">－</span>';
-                ?>
+                <span style="color:#2e7d32;">✅</span>
               </td>
             <?php elseif ($is_future): ?>
               <?php for ($c=0;$c<5;$c++): ?><td class="empty"></td><?php endfor; ?>
@@ -552,8 +561,8 @@ table.dept-table tfoot td.dept-name { text-align: left; }
             <?php endif; ?>
           </tr>
           <?php
-          // --- 部門別サブ行（当年データがある日のみ） ---
-          if ($cf !== null && !empty($active_busho)):
+          // --- 部門別サブ行（当年データが確定している日のみ） ---
+          if ($cf !== null && !$is_unconfirmed && !empty($active_busho)):
               // この日に値がある部門だけ抽出
               $day_active = [];
               foreach ($active_busho as $field => $label) {
