@@ -540,9 +540,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       <?php if ($is_unconfirmed): ?>
       <td class="right mikakunin">未確定</td>
       <td class="right mikakunin">未確定</td>
-      <td class="right" style="color:#999; font-size:.9em;">
-        <?= $prev_uriage > 0 ? '¥' . number_format($prev_uriage) : '<span style="color:#ddd;">―</span>' ?>
-      </td>
+      <td class="right mikakunin">未確定</td>
       <td class="right mikakunin">未確定</td>
       <?php else: ?>
       <td class="right">

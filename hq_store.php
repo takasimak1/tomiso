@@ -194,7 +194,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
             $cy_sum_csv += $cy_s; $kyaku_sum_csv += $ky;
             if ($py_s !== null) $py_sum_csv += $py_s;
             if ($status !== '確定') {
-                $row = [$sel_month . '/' . $d, $dow, '未確定', ($py_s !== null ? $py_s : ''), '未確定', '未確定', $status];
+                $row = [$sel_month . '/' . $d, $dow, '未確定', '未確定', '未確定', '未確定', $status];
                 foreach ($active_busho as $_label2) { $row[] = '未確定'; $row[] = ''; $row[] = ''; }
             } else {
                 $row = [$sel_month . '/' . $d, $dow, $cy_s, ($py_s !== null ? $py_s : ''), $ratio, $ky, $status];
@@ -540,7 +540,7 @@ table.dept-table tfoot td.dept-name { text-align: left; }
             <td class="dow-col <?= $dow_class ?>"><?= $dow ?></td>
             <?php if ($is_unconfirmed): ?>
               <td class="mikakunin-cell" style="text-align:center;">未確定</td>
-              <td style="color:#888;"><?= $py_s !== null ? '¥' . number_format($py_s) : '－' ?></td>
+              <td class="mikakunin-cell" style="text-align:center;">未確定</td>
               <td class="mikakunin-cell" style="text-align:center;">未確定</td>
               <td class="mikakunin-cell" style="text-align:center;">未確定</td>
               <td class="status-col"><span style="color:#e65100;">△</span></td>
