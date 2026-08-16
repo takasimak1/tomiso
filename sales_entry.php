@@ -263,7 +263,8 @@ body { overflow: hidden; margin: 0; padding: 0; }
     display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr auto;  /* タブ → 商品 → カート */
-    height: calc(100dvh - 48px);        /* dvh: ブラウザナビバーを考慮した実際の高さ */
+    height: calc(100vh - 48px);         /* フォールバック: dvh未対応の古いWebView/Chrome向け */
+    height: calc(100dvh - 48px);        /* dvh: ブラウザナビバーを考慮した実際の高さ（対応ブラウザで上書き） */
     overflow: hidden;
     margin-top: 0 !important;
 }
