@@ -5,7 +5,10 @@
  * ・タブ「商品・店舗分析」＝商品別ランキング（②-1/②-2 相当、部門で絞り込み可）
  *   └ 商品名をクリックすると店舗別内訳にドリルダウン（②-3 相当）
  *   └ 「店舗別」に切り替えると、選択店舗の商品別内訳を表示（③ 相当）
- * データソース: pos_API（定価/値引の実績）＋ haiki_API（廃棄数）＋ hanbai_API（上代単価）
+ * データソース: pos_API（定価/値引の実績）＋ haiki_API（廃棄数）＋ daily_report_API（部門別・日次の上代目標）
+ * ・「上代」は商品マスタの単価ではなく、店舗が売上日報で毎日入力する部門別目標額
+ *   （daily_report_API.上代_◯◯）を積み上げたもの。商品単位の内訳は持たないため、
+ *   商品別ビュー（②-1/②-2/③相当）では行ごとの上代は出さず、合計行にのみ表示する。
  */
 use fmRESTor\fmRESTor;
 session_start();
@@ -45,7 +48,7 @@ $sel_product = ($tab === 'item' && $view === 'product') ? trim($_GET['product'] 
 $bumon_master = fetch_bumon_master($host, $db, $layout_bumon, $api_master_user, $api_master_pass);
 $bumon_names  = bumon_names($bumon_master);
 
-// 商品マスタ：商品名 => ['bumon'=>, 'tanka'=>上代単価]
+// 商品マスタ：商品名 => ['bumon'=>部門名]（haiki_APIには部門が無いため部門絞り込み・上代の部門特定に使用）
 $fmHanbai  = new fmRESTor($host, $db, $layout_hanbai, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
 $resHanbai = $fmHanbai->getRecords(['_limit' => 1000]);
 $product_master = [];
@@ -53,11 +56,20 @@ foreach ($resHanbai['result']['response']['data'] ?? [] as $row) {
     $f = $row['fieldData'];
     $n = trim($f['商品名'] ?? '');
     if ($n === '') continue;
-    $product_master[$n] = [
-        'bumon' => trim($f['部門'] ?? ''),
-        'tanka' => (int)($f['上代単価'] ?? 0),
-    ];
+    $product_master[$n] = ['bumon' => trim($f['部門'] ?? '')];
 }
+
+// 上代（部門別・日次目標）のフィールド定義。daily_report_entry.php と同一構成を維持すること。
+$all_busho = [
+    '売上_天ぷら' => '天ぷら', '売上_魚' => '魚', '売上_唐揚' => '唐揚', '売上_冷惣菜' => '冷惣菜',
+    '売上_催事' => '催事', '売上_イカ焼' => 'イカ焼', '売上_エキタカ' => 'エキタカ', '売上_くじら' => 'くじら',
+    '売上_コンビニデリカ' => 'コンビニデリカ', '売上_セルフ唐揚' => 'セルフ唐揚', '売上_セルフ天丼' => 'セルフ天丼',
+    '売上_セルフ惣菜' => 'セルフ惣菜', '売上_フライ' => 'フライ', '売上_串揚' => '串揚', '売上_丼' => '丼',
+    '売上_個食' => '個食', '売上_弁当' => '弁当', '売上_弁当Ⅱ' => '弁当Ⅱ', '売上_生串揚' => '生串揚', '売上_鯛' => '鯛',
+];
+$joudai_fields = array_values(array_map(fn($label) => '上代_' . $label, $all_busho));
+// 部門名 => 上代フィールド名
+$joudai_field_of_bumon = array_combine(array_values($all_busho), $joudai_fields);
 
 // 店舗マスタ：店舗Ｎｏ（account_API・全角Ｎ）=> 店舗名
 $fmAccount  = new fmRESTor($host, $db, $layout_account, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
@@ -110,6 +122,30 @@ $pos_records   = ($group_mode === 'product_of_store' && $sel_store === '') ? [] 
 $haiki_records = ($group_mode === 'product_of_store' && $sel_store === '') ? [] : fetchAllRecords($fmHaiki, $haiki_query);
 
 // ============================================================
+// daily_report_API 取得（部門別・日次の上代目標）
+// ============================================================
+$joudai_query = ['売上日' => "{$from_fm}...{$to_fm}"];
+if ($group_mode === 'product_of_store' && $sel_store !== '') $joudai_query['fk_店舗No'] = $sel_store;
+$fmReport = new fmRESTor($host, $db, $layout_daily_report, $api_master_user, $api_master_pass, ['allowInsecure' => true]);
+$report_records = ($group_mode === 'product_of_store' && $sel_store === '') ? [] : fetchAllRecords($fmReport, $joudai_query);
+
+$joudai_by_date       = []; // date_fm => 上代合計（全店・全部門）
+$joudai_by_store_dept = []; // store_no => [部門名 => 上代合計]
+foreach ($report_records as $f) {
+    $sno  = trim((string)($f['fk_店舗No'] ?? ''));
+    $date = $f['売上日'] ?? '';
+    foreach ($joudai_fields as $jf) {
+        $val = (int)($f[$jf] ?? 0);
+        if ($val === 0) continue;
+        $label = array_search($jf, $joudai_field_of_bumon, true);
+        if ($date !== '') $joudai_by_date[$date] = ($joudai_by_date[$date] ?? 0) + $val;
+        if ($sno !== '' && $label !== false) {
+            $joudai_by_store_dept[$sno][$label] = ($joudai_by_store_dept[$sno][$label] ?? 0) + $val;
+        }
+    }
+}
+
+// ============================================================
 // 集計（[バケット][商品名] => 定価/値引/廃棄 の積み上げ → バケット単位に上代を合算）
 // ============================================================
 $agg = [];
@@ -160,21 +196,16 @@ foreach ($haiki_records as $f) {
     $agg[$bucket][$name]['haiki_su'] += (int)($f['廃棄数'] ?? 0);
 }
 
-// バケット単位にロールアップ
+// バケット単位にロールアップ（上代は商品単位の内訳を持たないため、この時点では計算しない）
 $rows = [];
-$has_missing_tanka = false;
 foreach ($agg as $bucket => $products) {
-    $teika_su = 0; $teika_uri = 0; $nebiki_su = 0; $nebiki_uri = 0; $haiki_su = 0; $joudai = 0;
-    foreach ($products as $pname => $v) {
+    $teika_su = 0; $teika_uri = 0; $nebiki_su = 0; $nebiki_uri = 0; $haiki_su = 0;
+    foreach ($products as $v) {
         $teika_su   += $v['teika_su'];
         $teika_uri  += $v['teika_uri'];
         $nebiki_su  += $v['nebiki_su'];
         $nebiki_uri += $v['nebiki_uri'];
         $haiki_su   += $v['haiki_su'];
-        $goukei_p    = $v['teika_su'] + $v['nebiki_su'] + $v['haiki_su'];
-        $tanka       = $product_master[$pname]['tanka'] ?? 0;
-        if ($tanka === 0 && $goukei_p > 0) $has_missing_tanka = true;
-        $joudai += $goukei_p * $tanka;
     }
     $goukei = $teika_su + $nebiki_su + $haiki_su;
     $rows[$bucket] = [
@@ -186,10 +217,28 @@ foreach ($agg as $bucket => $products) {
         'haiki_su' => $haiki_su,
         'haiki_ritsu' => $goukei > 0 ? $haiki_su / $goukei : null,
         'goukei' => $goukei,
-        'joudai' => $joudai,
-        'joudai_ritsu' => $joudai > 0 ? ($teika_uri + $nebiki_uri) / $joudai : null,
+        'joudai' => null,
+        'joudai_ritsu' => null,
     ];
 }
+
+// 上代（部門別・日次目標の積み上げ）をバケットの意味に応じて割り当てる
+// ・date: その日の全店・全部門合計 → 商品構成に関わらず一意に定まる
+// ・store_of_product: 選択商品の部門について、その店舗の期間合計
+// ・product / product_of_store: 商品単位では定義できないため行には出さない（合計行のみ後段で設定）
+foreach ($rows as $bucket => &$r) {
+    if ($group_mode === 'date') {
+        $j = $joudai_by_date[$bucket] ?? 0;
+        $r['joudai'] = $j;
+        $r['joudai_ritsu'] = $j > 0 ? ($r['teika_uri'] + $r['nebiki_uri']) / $j : null;
+    } elseif ($group_mode === 'store_of_product') {
+        $dept = $product_master[$sel_product]['bumon'] ?? '';
+        $j = $joudai_by_store_dept[$bucket][$dept] ?? 0;
+        $r['joudai'] = $j;
+        $r['joudai_ritsu'] = $j > 0 ? ($r['teika_uri'] + $r['nebiki_uri']) / $j : null;
+    }
+}
+unset($r);
 
 // 並び替え
 if ($group_mode === 'date') {
@@ -203,15 +252,26 @@ if ($group_mode === 'date') {
 }
 
 // 合計行
-$total = ['teika_su' => 0, 'teika_uri' => 0, 'nebiki_su' => 0, 'nebiki_uri' => 0, 'haiki_su' => 0, 'goukei' => 0, 'joudai' => 0];
+$total = ['teika_su' => 0, 'teika_uri' => 0, 'nebiki_su' => 0, 'nebiki_uri' => 0, 'haiki_su' => 0, 'goukei' => 0];
 foreach ($rows as $r) {
-    foreach (['teika_su', 'teika_uri', 'nebiki_su', 'nebiki_uri', 'haiki_su', 'goukei', 'joudai'] as $k) {
+    foreach (['teika_su', 'teika_uri', 'nebiki_su', 'nebiki_uri', 'haiki_su', 'goukei'] as $k) {
         $total[$k] += $r[$k];
     }
 }
 $total['teika_ritsu']  = $total['goukei'] > 0 ? $total['teika_su']  / $total['goukei'] : null;
 $total['nebiki_ritsu'] = $total['goukei'] > 0 ? $total['nebiki_su'] / $total['goukei'] : null;
 $total['haiki_ritsu']  = $total['goukei'] > 0 ? $total['haiki_su']  / $total['goukei'] : null;
+
+// 合計行の上代：商品別ビューでは「表示中の範囲（全部門 or 選択部門／選択店舗）」の期間合計を充てる
+if ($group_mode === 'date' || $group_mode === 'store_of_product') {
+    $total['joudai'] = array_sum(array_column($rows, 'joudai'));
+} elseif ($group_mode === 'product') {
+    $total['joudai'] = $sel_bumon !== ''
+        ? array_sum(array_column($joudai_by_store_dept, $sel_bumon))
+        : array_sum(array_map('array_sum', $joudai_by_store_dept));
+} else { // product_of_store
+    $total['joudai'] = array_sum($joudai_by_store_dept[$sel_store] ?? []);
+}
 $total['joudai_ritsu'] = $total['joudai'] > 0 ? ($total['teika_uri'] + $total['nebiki_uri']) / $total['joudai'] : null;
 
 // ============================================================
@@ -231,7 +291,7 @@ function rowLabel(string $group_mode, string $bucket, array $store_master): stri
 }
 
 function pct($v): string { return $v === null ? '―' : number_format($v * 100, 1) . '%'; }
-function yen($v): string { return number_format((int)round($v)); }
+function yen($v): string { return $v === null ? '―' : number_format((int)round($v)); }
 
 $col_defs = [
     ['key' => 'teika_su',   'label' => '定価販売数', 'fmt' => 'num'],
@@ -247,6 +307,7 @@ $col_defs = [
     ['key' => 'joudai_ritsu','label'=> '上代達成率', 'fmt' => 'pct'],
 ];
 function fmtCell(array $col, $v): string {
+    if ($v === null) return '―';
     return match ($col['fmt']) {
         'num' => number_format((int)$v),
         'yen' => '¥' . yen($v),
@@ -410,8 +471,8 @@ table.tp-table tfoot td.left { text-align: left; }
     </div>
   <?php endif; ?>
 
-  <?php if ($has_missing_tanka): ?>
-    <div class="tp-warn">ℹ 上代単価が未設定（0円）の商品が含まれています。該当商品の「上代」「上代達成率」は正しく計算されません。hanbai_API の上代単価をご確認ください。</div>
+  <?php if ($group_mode === 'product' || $group_mode === 'product_of_store'): ?>
+    <div class="tp-warn">ℹ 上代は売上日報で入力する部門別の日次目標のため、商品単位の内訳は表示できません。合計行に表示範囲（<?= $group_mode === 'product' ? ($sel_bumon !== '' ? htmlspecialchars($sel_bumon) . '部門' : '全部門') : '選択店舗' ?>・選択期間）の上代目標を表示しています。</div>
   <?php endif; ?>
 
   <?php if ($group_mode === 'product_of_store' && $sel_store === ''): ?>
