@@ -108,6 +108,10 @@ include __DIR__ . '/hq_header.php';
       <span class="nav-icon">🏪</span>
       店舗別集計
     </a>
+    <a href="hq_tanpin.php" class="nav-btn">
+      <span class="nav-icon">🔍</span>
+      単品管理
+    </a>
   </div>
 
   <!-- マスター管理 -->
