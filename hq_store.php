@@ -170,7 +170,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
     fputcsv($out, ['期間', "{$sel_year}年{$sel_month}月"]);
     fputcsv($out, []);
     // ヘッダー：基本列 ＋ 部門列（本年・前年・昨対）
-    $csv_header = ['日', '曜', '本年合計', '前年合計', '昨対比(%)', '客数', '状態'];
+    $csv_header = ['日', '曜', '本年合計', '前年合計', '昨対比(%)', '客数', '上代', '上代達成率(%)', '状態'];
     foreach ($active_busho as $field => $label) {
         $csv_header[] = $label . '_本年';
         $csv_header[] = $label . '_前年';
@@ -179,7 +179,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
     fputcsv($out, $csv_header);
 
     $week_ja_csv = ['Sun'=>'日','Mon'=>'月','Tue'=>'火','Wed'=>'水','Thu'=>'木','Fri'=>'金','Sat'=>'土'];
-    $cy_sum_csv = 0; $py_sum_csv = 0; $kyaku_sum_csv = 0;
+    $cy_sum_csv = 0; $py_sum_csv = 0; $kyaku_sum_csv = 0; $joudai_sum_csv = 0;
     for ($d = 1; $d <= $days_in_month; $d++) {
         $ts  = mktime(0,0,0,$sel_month,$d,$sel_year);
         $dow = $week_ja_csv[date('D', $ts)] ?? '';
@@ -194,14 +194,17 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
             $cy_sum_csv += $cy_s; $kyaku_sum_csv += $ky;
             if ($py_s !== null) $py_sum_csv += $py_s;
             $is_teikyu_csv = ((int)($cf['定休日'] ?? 0) === 1);
+            $joudai_csv    = (int)($cf['上代合計'] ?? 0);
+            $joudai_r_csv  = ($joudai_csv > 0) ? round($cy_s / $joudai_csv * 100, 1) : '';
+            $joudai_sum_csv += $joudai_csv;
             if ($status !== '確定') {
-                $row = [$sel_month . '/' . $d, $dow, '未確定', '未確定', '未確定', '未確定', $status];
+                $row = [$sel_month . '/' . $d, $dow, '未確定', '未確定', '未確定', '未確定', '未確定', '未確定', $status];
                 foreach ($active_busho as $_label2) { $row[] = '未確定'; $row[] = ''; $row[] = ''; }
             } elseif ($is_teikyu_csv) {
-                $row = [$sel_month . '/' . $d, $dow, '定休日', '定休日', '', '', '定休日'];
+                $row = [$sel_month . '/' . $d, $dow, '定休日', '定休日', '', '', '', '', '定休日'];
                 foreach ($active_busho as $_label2) { $row[] = ''; $row[] = ''; $row[] = ''; }
             } else {
-                $row = [$sel_month . '/' . $d, $dow, $cy_s, ($py_s !== null ? $py_s : ''), $ratio, $ky, $status];
+                $row = [$sel_month . '/' . $d, $dow, $cy_s, ($py_s !== null ? $py_s : ''), $ratio, $ky, ($joudai_csv > 0 ? $joudai_csv : ''), $joudai_r_csv, $status];
                 // 部門列を追加
                 foreach ($active_busho as $field => $_label) {
                     $dcy = (int)($cf[$field] ?? 0);
@@ -214,14 +217,15 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
             }
             fputcsv($out, $row);
         } else {
-            $row = [$sel_month . '/' . $d, $dow, '', '', '', '', ''];
+            $row = [$sel_month . '/' . $d, $dow, '', '', '', '', '', '', ''];
             foreach ($active_busho as $_ => $__) { $row[] = ''; $row[] = ''; $row[] = ''; }
             fputcsv($out, $row);
         }
     }
     // 月合計行
     $total_r_csv = ($py_sum_csv > 0) ? round($cy_sum_csv / $py_sum_csv * 100, 1) : '';
-    $total_row = ['月合計', '', $cy_sum_csv, $py_sum_csv, $total_r_csv, $kyaku_sum_csv, ''];
+    $total_joudai_r_csv = ($joudai_sum_csv > 0) ? round($cy_sum_csv / $joudai_sum_csv * 100, 1) : '';
+    $total_row = ['月合計', '', $cy_sum_csv, $py_sum_csv, $total_r_csv, $kyaku_sum_csv, $joudai_sum_csv, $total_joudai_r_csv, ''];
     foreach ($active_busho as $field => $_label) {
         $dcy_t = $cy_dept[$field];
         $dpy_t = $py_dept[$field];
@@ -505,12 +509,14 @@ table.dept-table tfoot td.dept-name { text-align: left; }
             <th>前年売上</th>
             <th>昨対</th>
             <th>客数</th>
+            <th>上代</th>
+            <th>上代達成率</th>
             <th>入力状態</th>
           </tr>
         </thead>
         <tbody>
           <?php
-            $cy_sum = 0; $py_sum = 0; $kyaku_sum = 0;
+            $cy_sum = 0; $py_sum = 0; $kyaku_sum = 0; $joudai_sum = 0;
             for ($d = 1; $d <= $days_in_month; $d++):
               $ts = mktime(0,0,0,$sel_month,$d,$sel_year);
               $dow = $week_ja[date('D', $ts)] ?? '';
@@ -523,10 +529,12 @@ table.dept-table tfoot td.dept-name { text-align: left; }
               if ($cf !== null) {
                   $cy_s = (int)($cf['合計売上'] ?? 0);
                   $ky   = (int)($cf['客数_閉店後'] ?? 0);
+                  $joudai = (int)($cf['上代合計'] ?? 0);
+                  $joudai_ritsu = ($joudai > 0) ? round($cy_s / $joudai * 100, 1) : null;
                   $status = $cf['入力状態'] ?? '入力中';
-                  $cy_sum += $cy_s; $kyaku_sum += $ky;
+                  $cy_sum += $cy_s; $kyaku_sum += $ky; $joudai_sum += $joudai;
               } else {
-                  $cy_s = null; $ky = null; $status = null;
+                  $cy_s = null; $ky = null; $status = null; $joudai = null; $joudai_ritsu = null;
               }
               if ($pf !== null) {
                   $py_s = (int)($pf['合計売上'] ?? 0);
@@ -548,23 +556,29 @@ table.dept-table tfoot td.dept-name { text-align: left; }
               <td class="mikakunin-cell" style="text-align:center;">未確定</td>
               <td class="mikakunin-cell" style="text-align:center;">未確定</td>
               <td class="mikakunin-cell" style="text-align:center;">未確定</td>
+              <td class="mikakunin-cell" style="text-align:center;">未確定</td>
+              <td class="mikakunin-cell" style="text-align:center;">未確定</td>
               <td class="status-col"><span style="color:#e65100;">△</span></td>
             <?php elseif ($is_teikyu): ?>
-              <td colspan="4" style="text-align:center; color:#888;">🏠 定休日</td>
+              <td colspan="6" style="text-align:center; color:#888;">🏠 定休日</td>
               <td class="status-col"><span style="color:#2e7d32;">✅</span></td>
             <?php elseif ($cf !== null): ?>
               <td>¥<?= number_format($cy_s) ?></td>
               <td style="color:#888;"><?= $py_s !== null ? '¥' . number_format($py_s) : '－' ?></td>
               <td class="<?= $r_class ?>"><?= $ratio !== null ? $ratio . '%' : '－' ?></td>
               <td><?= number_format($ky) ?></td>
+              <td style="color:#888;"><?= $joudai > 0 ? '¥' . number_format($joudai) : '－' ?></td>
+              <td class="<?= $joudai_ritsu === null ? '' : ($joudai_ritsu >= 100 ? 'ratio-high-cell' : 'ratio-low-cell') ?>">
+                <?= $joudai_ritsu !== null ? $joudai_ritsu . '%' : '－' ?>
+              </td>
               <td class="status-col">
                 <span style="color:#2e7d32;">✅</span>
               </td>
             <?php elseif ($is_future): ?>
-              <?php for ($c=0;$c<5;$c++): ?><td class="empty"></td><?php endfor; ?>
+              <?php for ($c=0;$c<6;$c++): ?><td class="empty"></td><?php endfor; ?>
               <td></td>
             <?php else: ?>
-              <?php for ($c=0;$c<5;$c++): ?><td class="empty">－</td><?php endfor; ?>
+              <?php for ($c=0;$c<6;$c++): ?><td class="empty">－</td><?php endfor; ?>
               <td class="status-col" style="color:#bbb;">未</td>
             <?php endif; ?>
           </tr>
@@ -595,6 +609,8 @@ table.dept-table tfoot td.dept-name { text-align: left; }
             <td class="right <?= $dr_cls ?>"><?= $dr !== null ? $dr . '%' : '<span style="color:#ccc;">－</span>' ?></td>
             <td></td>
             <td></td>
+            <td></td>
+            <td></td>
           </tr>
           <?php
               endforeach;
@@ -615,6 +631,14 @@ table.dept-table tfoot td.dept-name { text-align: left; }
               ?>
             </td>
             <td><?= number_format($kyaku_sum) ?></td>
+            <td style="color:#888;">¥<?= number_format($joudai_sum) ?></td>
+            <td>
+              <?php
+                $total_jr = ($joudai_sum > 0) ? round($cy_sum / $joudai_sum * 100, 1) : null;
+                $tjr_class = ($total_jr === null) ? '' : ($total_jr >= 100 ? 'ratio-high-cell' : 'ratio-low-cell');
+                echo $total_jr !== null ? "<span class='{$tjr_class}'>{$total_jr}%</span>" : '－';
+              ?>
+            </td>
             <td></td>
           </tr>
         </tfoot>
