@@ -265,6 +265,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     skip_save:;
 }
 
+// ---- 定休日一覧（自店舗分のみ。POST保存後の最新状態を反映するためここで取得） ----
+$teikyu_list = [];
+$qrTeikyu = $fm->findRecords([
+    'query' => [['fk_店舗No' => $store_id, '定休日' => 1]],
+    'sort'  => [['fieldName' => '売上日', 'sortOrder' => 'ascend']],
+    'limit' => 200,
+]);
+if (($qrTeikyu['result']['messages'][0]['code'] ?? '0') !== '401') {
+    foreach ($qrTeikyu['result']['response']['data'] ?? [] as $row) {
+        $d = $row['fieldData']['売上日'] ?? '';
+        if ($d !== '') $teikyu_list[] = $d;
+    }
+}
+
 // ---- ヘルパー ----
 function _int(string $key): int { return (int)($_POST[$key] ?? 0); }
 
@@ -505,6 +519,12 @@ include __DIR__ . '/header.php';
 }
 .accord-body.open { display: block; }
 
+.teikyu-list { list-style: none; margin: 0; padding: 0; font-size: 0.85em; }
+.teikyu-list li { padding: 0.3em 0.1em; border-bottom: 1px solid #eee; }
+.teikyu-list li:last-child { border-bottom: none; }
+.teikyu-list a { color: #004d40; text-decoration: none; font-weight: bold; }
+.teikyu-list a:hover { text-decoration: underline; }
+
 .bumon-grid {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
@@ -654,15 +674,15 @@ include __DIR__ . '/header.php';
     ?>
     <div class="alert <?= $alert_cls ?> py-2 text-center mb-2" style="font-size:.88em;"><?= $success_msg ?></div>
   <?php endif; ?>
-  <?php if ($is_future_page): ?>
+  <?php if ($is_future_page && !$is_kakutei): ?>
     <div class="kakutei-banner" style="background:#e3f2fd; border-left-color:#1565c0; color:#1565c0;">
-      📅 この日付はまだ到来していません。前年データの参照のみ可能です。
+      📅 この日付はまだ到来していません。前年データの参照と、定休日の設定のみ可能です。
     </div>
   <?php endif; ?>
   <?php if ($is_kakutei): ?>
     <div class="kakutei-banner">
       <?php if ((int)($fd['定休日'] ?? 0) === 1): ?>
-        🏠 本日は定休日として確定済みです。
+        🏠 この日は定休日として確定済みです。
       <?php else: ?>
         ✅ この日の売上日報は確定済みです。
       <?php endif; ?>
@@ -677,27 +697,54 @@ include __DIR__ . '/header.php';
     </div>
   <?php endif; ?>
 
-  <?php if (!$is_kakutei && !$is_future_page): ?>
-    <div class="dr-section">
-      <div class="dr-section-head">🏠 定休日</div>
-      <div class="dr-section-body">
+  <div class="dr-section">
+    <div class="dr-section-head">🏠 定休日</div>
+    <div class="dr-section-body">
+      <?php if (!$is_kakutei): ?>
         <div class="spec-note">
           <div class="spec-note-title">ℹ 定休日について</div>
           <ul>
-            <li>本日が定休日（休業日）の場合は、下のボタンで確定してください。</li>
+            <li>この日が定休日（休業日）の場合は、下のボタンで確定してください。</li>
             <li>売上・客数はすべて0円・0人として確定されます（個別入力は不要です）。</li>
+            <li>先の予定が分かっている場合は、未来の日付（最大30日先まで）でも設定できます。</li>
           </ul>
         </div>
         <form method="post">
           <input type="hidden" name="action" value="teikyubi">
           <button type="button" class="save-btn kakutei"
-                  onclick="if(confirm('本日を定休日として確定します。\n売上・客数はすべて0で確定されます。よろしいですか？')) this.closest('form').submit()">
-            🏠 本日は定休日として確定する
+                  onclick="if(confirm('この日（<?= htmlspecialchars($target_date_jp) ?>）を定休日として確定します。\n売上・客数はすべて0で確定されます。よろしいですか？')) this.closest('form').submit()">
+            🏠 この日を定休日として確定する
           </button>
         </form>
+      <?php endif; ?>
+
+      <!-- ▼ 定休日一覧アコーディオン（自店舗分のみ） -->
+      <div class="accord-wrap" style="margin-top:0.7em;">
+        <div class="accord-head" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open')">
+          📅 定休日一覧（<?= count($teikyu_list) ?>件・クリックで開閉）
+          <span class="accord-arrow">▼</span>
+        </div>
+        <div class="accord-body">
+          <?php if (empty($teikyu_list)): ?>
+            <div style="font-size:0.85em; color:#888;">登録されている定休日はありません。</div>
+          <?php else: ?>
+            <ul class="teikyu-list">
+              <?php foreach ($teikyu_list as $tk_fm):
+                $tk_dt = \DateTime::createFromFormat('m/d/Y', $tk_fm);
+                if (!$tk_dt) continue;
+                $tk_label = $tk_dt->format('Y年n月j日') . '（' . ($week_ja[$tk_dt->format('l')] ?? '') . '）';
+                $tk_is_past = $tk_dt < $today_dt;
+              ?>
+              <li<?= $tk_is_past ? ' style="color:#999;"' : '' ?>>
+                <a href="?date=<?= urlencode($tk_fm) ?>"><?= htmlspecialchars($tk_label) ?></a>
+              </li>
+              <?php endforeach; ?>
+            </ul>
+          <?php endif; ?>
+        </div>
       </div>
     </div>
-  <?php endif; ?>
+  </div>
 
   <!-- 上代（毎日1回・時間帯に関係なく入力可・合計のみ） -->
   <div class="dr-section">
