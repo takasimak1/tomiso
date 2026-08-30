@@ -165,10 +165,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
     header('Cache-Control: no-cache, no-store');
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
-    fputcsv($out, ['店舗No', $sel_store]);
-    fputcsv($out, ['店舗名', $store_name_sel]);
-    fputcsv($out, ['期間', "{$sel_year}年{$sel_month}月"]);
-    fputcsv($out, []);
+    $fputcsv = fn(array $row) => fputcsv($out, $row, ',', '"', '\\');
+    $fputcsv(['店舗No', $sel_store]);
+    $fputcsv(['店舗名', $store_name_sel]);
+    $fputcsv(['期間', "{$sel_year}年{$sel_month}月"]);
+    $fputcsv([]);
     // ヘッダー：基本列 ＋ 部門列（本年・前年・昨対）
     $csv_header = ['日', '曜', '本年合計', '前年合計', '昨対比(%)', '客数', '上代', '上代達成率(%)', '状態'];
     foreach ($active_busho as $field => $label) {
@@ -176,7 +177,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
         $csv_header[] = $label . '_前年';
         $csv_header[] = $label . '_昨対(%)';
     }
-    fputcsv($out, $csv_header);
+    $fputcsv($csv_header);
 
     $week_ja_csv = ['Sun'=>'日','Mon'=>'月','Tue'=>'火','Wed'=>'水','Thu'=>'木','Fri'=>'金','Sat'=>'土'];
     $cy_sum_csv = 0; $py_sum_csv = 0; $kyaku_sum_csv = 0; $joudai_sum_csv = 0;
@@ -215,11 +216,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
                     $row[] = $dr;
                 }
             }
-            fputcsv($out, $row);
+            $fputcsv($row);
         } else {
             $row = [$sel_month . '/' . $d, $dow, '', '', '', '', '', '', ''];
             foreach ($active_busho as $_ => $__) { $row[] = ''; $row[] = ''; $row[] = ''; }
-            fputcsv($out, $row);
+            $fputcsv($row);
         }
     }
     // 月合計行
@@ -234,7 +235,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
         $total_row[] = $dpy_t > 0 ? $dpy_t : '';
         $total_row[] = $dr_t;
     }
-    fputcsv($out, $total_row);
+    $fputcsv($total_row);
     fclose($out);
     exit();
 }
