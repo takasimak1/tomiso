@@ -75,12 +75,7 @@ $all_busho = [
     '売上_鯛'             => '鯛',
 ];
 
-// ---- 上代（部門別・毎日1回・「今日はこれだけ売るつもり」の目標額） ----
-// $all_busho と部門構成を揃え、キーだけ 売上_→上代_ に置き換える
-$all_joudai = [];
-foreach ($all_busho as $busho_field => $busho_label) {
-    $all_joudai[str_replace('売上_', '上代_', $busho_field)] = $busho_label;
-}
+// ---- 上代（毎日1回・「今日はこれだけ売るつもり」の合計目標額。部門別ではなく合計のみ入力） ----
 
 // ---- FM 接続 ----
 $fm = new fmRESTor($host, $db, $layout_daily_report,
@@ -155,10 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($is_kakutei && $action !== 'save_joudai') goto skip_save;
 
     if ($action === 'save_joudai') {
-        foreach (array_keys($all_joudai) as $f) {
-            $save[$f] = _int($f);
-        }
-        // 上代合計はFM計算フィールドのため送信しない
+        $save['上代合計'] = _int('上代合計');
     } elseif ($action === 'save_12') {
         $save = ['客数_12時' => _int('客数_12時'), '売上累計_12時' => _int('売上累計_12時')];
     } elseif ($action === 'save_15') {
@@ -200,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $record_id = $res['result']['response']['recordId'] ?? null;
             } else {
                 // 部門フィールドを除いてリトライ（レイアウト未登録フィールド対策）
-                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho) && !array_key_exists($k, $all_joudai), ARRAY_FILTER_USE_KEY);
+                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho), ARRAY_FILTER_USE_KEY);
                 $res2b = $fm->createRecord(['fieldData' => $save_base]);
                 $code2b = (string)($res2b['result']['messages'][0]['code'] ?? '?');
                 if ($code2b === '0') {
@@ -218,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $fm_ok = true;
             } else {
                 // 部門フィールドを除いてリトライ
-                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho) && !array_key_exists($k, $all_joudai), ARRAY_FILTER_USE_KEY);
+                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho), ARRAY_FILTER_USE_KEY);
                 $res2b = $fm->editRecord($record_id, ['fieldData' => $save_base]);
                 $code2b = (string)($res2b['result']['messages'][0]['code'] ?? '?');
                 if ($code2b === '0') {
@@ -300,7 +292,7 @@ $goukei_py    = bushoGoukei($py_fd, $busho_keys);
 // FM計算フィールド「合計売上」を表示用に使用（PHP集計より正確）
 $goukei_fm    = (int)($fd['合計売上']    ?? 0);
 $goukei_py_fm = (int)($py_fd['合計売上'] ?? 0);
-// FM計算フィールド「上代合計」（上代_◯◯ の合計、FM側で計算）
+// 上代合計（店舗が直接入力する合計目標額。部門別ではなく単一の数値フィールド）
 $joudai_goukei_fm = (int)($fd['上代合計'] ?? 0);
 
 $badge_map = ['未入力' => 'secondary', '入力中' => 'warning text-dark', '確定' => 'success'];
@@ -658,10 +650,10 @@ include __DIR__ . '/header.php';
     </div>
   <?php endif; ?>
 
-  <!-- 上代（部門別・毎日1回・時間帯に関係なく入力可） -->
+  <!-- 上代（毎日1回・時間帯に関係なく入力可・合計のみ） -->
   <div class="dr-section">
     <div class="dr-section-head">
-      🎯 本日の上代（部門別）
+      🎯 本日の上代
       <?php if ($joudai_goukei_fm > 0): ?>
         <span class="done-mark">✓ 入力済</span>
       <?php endif; ?>
@@ -670,7 +662,7 @@ include __DIR__ . '/header.php';
       <div class="spec-note">
         <div class="spec-note-title">ℹ 上代について</div>
         <ul>
-          <li>「今日はこれだけ売るつもり」という金額（仕入れ額に見合った販売目標額）を部門ごとに入力してください。</li>
+          <li>「今日はこれだけ売るつもり」という金額（仕入れ額に見合った販売目標額）の合計を入力してください。</li>
           <li>時間帯に関係なく、1日1回まとめて設定・修正できます（確定後も編集可能です）。</li>
         </ul>
       </div>
@@ -682,27 +674,15 @@ include __DIR__ . '/header.php';
       </div>
       <form method="post" id="form-joudai">
         <input type="hidden" name="action" value="save_joudai">
-        <?php foreach ($all_joudai as $j_field => $j_label): ?>
-        <?php $j_busho_field = str_replace('上代_', '売上_', $j_field); ?>
-        <div class="cmp-grid busho-cmp" data-field="<?= $j_busho_field ?>">
-          <span class="cmp-label"><?= $j_label ?></span>
+        <div class="cmp-grid">
+          <span class="cmp-label">上代合計</span>
           <div>
-            <input class="cmp-input joudai-input" type="number" name="<?= $j_field ?>"
-                   inputmode="numeric" value="<?= fv($fd, $j_field) ?>"
+            <input class="cmp-input" type="number" name="上代合計"
+                   inputmode="numeric" value="<?= fv($fd, '上代合計') ?>"
                    <?= $is_future_page ? 'disabled' : '' ?> min="0">
             <span class="cmp-unit">円</span>
           </div>
           <div class="cmp-py"></div>
-        </div>
-        <?php endforeach; ?>
-
-        <div class="total-bar">
-          <span class="t-label">上代合計</span>
-          <span class="t-this" id="joudai-goukei">
-            <?= $joudai_goukei_fm > 0 ? '¥' . number_format($joudai_goukei_fm) : '―' ?>
-          </span>
-          <span class="t-tr"></span>
-          <span class="t-py"></span>
         </div>
 
         <?php if (!$is_future_page): ?>
@@ -944,19 +924,6 @@ function calcGoukei() {
 }
 document.querySelectorAll('.busho-input').forEach(el => {
     el.addEventListener('input', calcGoukei);
-});
-
-// ---- 上代合計リアルタイム計算 ----
-function calcJoudaiGoukei() {
-    let total = 0;
-    document.querySelectorAll('.joudai-input').forEach(el => {
-        total += parseInt(el.value || 0, 10);
-    });
-    document.getElementById('joudai-goukei').textContent =
-        total > 0 ? '¥' + total.toLocaleString() : '―';
-}
-document.querySelectorAll('.joudai-input').forEach(el => {
-    el.addEventListener('input', calcJoudaiGoukei);
 });
 
 // ---- 部門設定 localStorage ----
