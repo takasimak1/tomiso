@@ -138,9 +138,12 @@ if (($_GET['msg'] ?? '') === 'kaijo') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    // ---- 確定解除 ----
+    // ---- 確定解除（定休日フラグも一緒に解除。フィールド未登録環境向けにフォールバックあり） ----
     if ($action === 'kaijo' && $is_kakutei && $record_id !== null) {
-        $fm->editRecord($record_id, ['fieldData' => ['入力状態' => '入力中']]);
+        $r = $fm->editRecord($record_id, ['fieldData' => ['入力状態' => '入力中', '定休日' => 0]]);
+        if ($fm->isError($r)) {
+            $fm->editRecord($record_id, ['fieldData' => ['入力状態' => '入力中']]);
+        }
         header('Location: ?date=' . urlencode($target_date_fm) . '&msg=kaijo');
         exit();
     }
@@ -167,6 +170,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $save['入力状態'] = '確定';
             $save['確定日時'] = date('m/d/Y H:i:s');
         }
+    } elseif ($action === 'teikyubi') {
+        // 定休日：入力内容に関わらず売上・客数をすべて0にして確定する
+        foreach (array_keys($all_busho) as $f) {
+            $save[$f] = 0;
+        }
+        $save['客数_閉店後']   = 0;
+        $save['客数_12時']     = 0;
+        $save['売上累計_12時'] = 0;
+        $save['客数_15時']     = 0;
+        $save['売上累計_15時'] = 0;
+        $save['客数_17時']     = 0;
+        $save['売上累計_17時'] = 0;
+        $save['定休日']        = 1;
+        $save['入力状態']      = '確定';
+        $save['確定日時']      = date('m/d/Y H:i:s');
     }
 
     if (!empty($save)) {
@@ -192,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $record_id = $res['result']['response']['recordId'] ?? null;
             } else {
                 // 部門フィールドを除いてリトライ（レイアウト未登録フィールド対策）
-                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho), ARRAY_FILTER_USE_KEY);
+                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho) && $k !== '定休日', ARRAY_FILTER_USE_KEY);
                 $res2b = $fm->createRecord(['fieldData' => $save_base]);
                 $code2b = (string)($res2b['result']['messages'][0]['code'] ?? '?');
                 if ($code2b === '0') {
@@ -210,7 +228,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $fm_ok = true;
             } else {
                 // 部門フィールドを除いてリトライ
-                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho), ARRAY_FILTER_USE_KEY);
+                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho) && $k !== '定休日', ARRAY_FILTER_USE_KEY);
                 $res2b = $fm->editRecord($record_id, ['fieldData' => $save_base]);
                 $code2b = (string)($res2b['result']['messages'][0]['code'] ?? '?');
                 if ($code2b === '0') {
@@ -232,11 +250,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$fm_ok) {
             $success_msg = '❌ 保存エラー（FM code: ' . $fm_err_code . ' / ' . $fm_err_msg . '）';
-        } elseif ($fm_err_msg !== '') {
-            $base_msg    = ($action === 'kakutei') ? '✅ 確定しました。' : '💾 保存しました。';
-            $success_msg = $base_msg . '<br><small style="color:#e65100;">' . htmlspecialchars($fm_err_msg) . '</small>';
         } else {
-            $success_msg = ($action === 'kakutei') ? '✅ 確定しました。' : '💾 保存しました。';
+            $base_msg = match ($action) {
+                'kakutei'  => '✅ 確定しました。',
+                'teikyubi' => '🏠 定休日として確定しました。',
+                default    => '💾 保存しました。',
+            };
+            $success_msg = $base_msg;
+            if ($fm_err_msg !== '') {
+                $success_msg .= '<br><small style="color:#e65100;">' . htmlspecialchars($fm_err_msg) . '</small>';
+            }
         }
     }
     skip_save:;
@@ -638,7 +661,11 @@ include __DIR__ . '/header.php';
   <?php endif; ?>
   <?php if ($is_kakutei): ?>
     <div class="kakutei-banner">
-      ✅ この日の売上日報は確定済みです。
+      <?php if ((int)($fd['定休日'] ?? 0) === 1): ?>
+        🏠 本日は定休日として確定済みです。
+      <?php else: ?>
+        ✅ この日の売上日報は確定済みです。
+      <?php endif; ?>
       <br>
       <form method="post" style="display:inline;">
         <input type="hidden" name="action" value="kaijo">
@@ -647,6 +674,28 @@ include __DIR__ . '/header.php';
           🔓 確定を解除する
         </button>
       </form>
+    </div>
+  <?php endif; ?>
+
+  <?php if (!$is_kakutei && !$is_future_page): ?>
+    <div class="dr-section">
+      <div class="dr-section-head">🏠 定休日</div>
+      <div class="dr-section-body">
+        <div class="spec-note">
+          <div class="spec-note-title">ℹ 定休日について</div>
+          <ul>
+            <li>本日が定休日（休業日）の場合は、下のボタンで確定してください。</li>
+            <li>売上・客数はすべて0円・0人として確定されます（個別入力は不要です）。</li>
+          </ul>
+        </div>
+        <form method="post">
+          <input type="hidden" name="action" value="teikyubi">
+          <button type="button" class="save-btn kakutei"
+                  onclick="if(confirm('本日を定休日として確定します。\n売上・客数はすべて0で確定されます。よろしいですか？')) this.closest('form').submit()">
+            🏠 本日は定休日として確定する
+          </button>
+        </form>
+      </div>
     </div>
   <?php endif; ?>
 

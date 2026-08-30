@@ -193,9 +193,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $sel_store !== '') {
             $ratio  = ($py_s !== null && $py_s > 0) ? round($cy_s / $py_s * 100, 1) : '';
             $cy_sum_csv += $cy_s; $kyaku_sum_csv += $ky;
             if ($py_s !== null) $py_sum_csv += $py_s;
+            $is_teikyu_csv = ((int)($cf['定休日'] ?? 0) === 1);
             if ($status !== '確定') {
                 $row = [$sel_month . '/' . $d, $dow, '未確定', '未確定', '未確定', '未確定', $status];
                 foreach ($active_busho as $_label2) { $row[] = '未確定'; $row[] = ''; $row[] = ''; }
+            } elseif ($is_teikyu_csv) {
+                $row = [$sel_month . '/' . $d, $dow, '定休日', '定休日', '', '', '定休日'];
+                foreach ($active_busho as $_label2) { $row[] = ''; $row[] = ''; $row[] = ''; }
             } else {
                 $row = [$sel_month . '/' . $d, $dow, $cy_s, ($py_s !== null ? $py_s : ''), $ratio, $ky, $status];
                 // 部門列を追加
@@ -534,6 +538,7 @@ table.dept-table tfoot td.dept-name { text-align: left; }
                       ? round($cy_s / $py_s * 100, 1) : null;
               $r_class = ($ratio === null) ? '' : ($ratio >= 105 ? 'ratio-high-cell' : ($ratio < 95 ? 'ratio-low-cell' : ''));
               $is_unconfirmed = ($cf !== null && $status !== '確定');
+              $is_teikyu      = ($cf !== null && (int)($cf['定休日'] ?? 0) === 1);
           ?>
           <tr class="<?= $is_today ? 'today-row' : '' ?>">
             <td class="date-col"><?= $sel_month ?>/<?= $d ?></td>
@@ -544,6 +549,9 @@ table.dept-table tfoot td.dept-name { text-align: left; }
               <td class="mikakunin-cell" style="text-align:center;">未確定</td>
               <td class="mikakunin-cell" style="text-align:center;">未確定</td>
               <td class="status-col"><span style="color:#e65100;">△</span></td>
+            <?php elseif ($is_teikyu): ?>
+              <td colspan="4" style="text-align:center; color:#888;">🏠 定休日</td>
+              <td class="status-col"><span style="color:#2e7d32;">✅</span></td>
             <?php elseif ($cf !== null): ?>
               <td>¥<?= number_format($cy_s) ?></td>
               <td style="color:#888;"><?= $py_s !== null ? '¥' . number_format($py_s) : '－' ?></td>
@@ -562,7 +570,7 @@ table.dept-table tfoot td.dept-name { text-align: left; }
           </tr>
           <?php
           // --- 部門別サブ行（当年データが確定している日のみ） ---
-          if ($cf !== null && !$is_unconfirmed && !empty($active_busho)):
+          if ($cf !== null && !$is_unconfirmed && !$is_teikyu && !empty($active_busho)):
               // この日に値がある部門だけ抽出
               $day_active = [];
               foreach ($active_busho as $field => $label) {

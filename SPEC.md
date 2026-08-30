@@ -59,6 +59,12 @@ tomiso/
 | $layout_daily_report_sum | daily_report_sum_API | 日報集計・昨対 |
 | $layout_haiki | haiki_API | 廃棄日報（商品単位・1日1回入力） |
 
+### 定休日（daily_report_entry.php）
+店舗が「本日は定休日」ボタンで確定すると、部門別売上・客数（12時/15時/17時/閉店後）を
+すべて0にして即確定する（`daily_report_API.定休日`=1、数値フィールド）。0円確定の
+通常営業日と区別するため、`hq_store.php`（画面・CSV）と`daily_report_mystore.php`で
+「🏠 定休日」表示に切り替える。確定解除（kaijo）時は定休日フラグも0に戻す。
+
 ### 単品管理ダッシュボード（hq_tanpin.php）
 
 pos_API（定価/値引の実績）＋ haiki_API（廃棄数）＋ daily_report_API（店舗・日次の

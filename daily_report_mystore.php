@@ -526,6 +526,7 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
         $date_str  = date('n/j', $ts);
         $jotai_cls = $jotai !== null ? ($jotai_badge[$jotai] ?? 'secondary') : null;
         $is_unconfirmed = ($f !== null && $jotai !== '確定');
+        $is_teikyu      = ($f !== null && (int)($f['定休日'] ?? 0) === 1);
 
         // 未来の日はグレーアウト
         $row_style = $is_future_day ? ' style="opacity:.5;"' : '';
@@ -542,6 +543,8 @@ table.dept-month-table tfoot td.dept-name { text-align: left; }
       <td class="right mikakunin">未確定</td>
       <td class="right mikakunin">未確定</td>
       <td class="right mikakunin">未確定</td>
+      <?php elseif ($is_teikyu): ?>
+      <td class="right" colspan="4" style="text-align:center; color:#888;">🏠 定休日</td>
       <?php else: ?>
       <td class="right">
         <?= $this_uriage > 0 ? '¥' . number_format($this_uriage) : '<span style="color:#ccc;">―</span>' ?>
