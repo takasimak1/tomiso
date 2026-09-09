@@ -50,6 +50,7 @@ if (($r1['result']['messages'][0]['code'] ?? '0') !== '401') {
         $this_data[] = $rec['fieldData'];
     }
 }
+$this_data = _dedupe_by_uriage_date($this_data);
 
 // 前年データ取得（同日・同週同曜日の両方に対応できる広めの範囲）
 $prev_data = [];
@@ -63,6 +64,7 @@ if (($r2['result']['messages'][0]['code'] ?? '0') !== '401') {
         $prev_data[] = $rec['fieldData'];
     }
 }
+$prev_data = _dedupe_by_uriage_date($prev_data);
 
 // ---- 前年ルックアップマップ構築 ----
 // キー: 日(DD)            → 前年同日
@@ -167,6 +169,15 @@ function _fm_to_ts(string $fm_date): int|false {
     if (!$fm_date) return false;
     $dt = \DateTime::createFromFormat('m/d/Y', $fm_date);
     return $dt ? $dt->getTimestamp() : false;
+}
+
+/** 売上日が重複しているレコードを1件に集約する（二重登録データによる集計ズレ防止） */
+function _dedupe_by_uriage_date(array $records): array {
+    $byDate = [];
+    foreach ($records as $f) {
+        $byDate[$f['売上日'] ?? ''] = $f; // 同一日は後勝ち
+    }
+    return array_values($byDate);
 }
 
 $week_ja = ['1'=>'月','2'=>'火','3'=>'水','4'=>'木','5'=>'金','6'=>'土','7'=>'日'];

@@ -998,9 +998,19 @@ function toggleAccord() {
 
 // ---- 閉店後フォーム送信 ----
 function submitHeiten(action) {
+    const btns = document.querySelectorAll('#form-heiten .save-btn');
+    btns.forEach(b => b.disabled = true);
     document.getElementById('heiten-action').value = action;
     document.getElementById('form-heiten').submit();
 }
+
+// ---- 二重送信防止（連打・ダブルタップでレコードが重複作成されるのを防ぐ） ----
+document.addEventListener('submit', function (e) {
+    const form = e.target;
+    form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach(btn => {
+        btn.disabled = true;
+    });
+}, true);
 
 // ---- 部門合計リアルタイム計算 ----
 function calcGoukei() {
