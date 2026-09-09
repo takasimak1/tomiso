@@ -172,18 +172,28 @@ $res2      = $fm2->getRecords(['_limit' => 500]);
 $all_products = [];
 foreach ($res2['result']['response']['data'] ?? [] as $row) {
     $f = $row['fieldData'];
-    $toriatsukai = trim($f['取扱店舗'] ?? '');
-    if ($toriatsukai !== '' && $toriatsukai !== $store_id) continue;
+    // 発売中の自店舗取扱い商品のみ（sales_entry.php と同方式。取扱店舗は繰り返しフィールドのため
+    // 単純な文字列比較ではなく getStorePositions() で全ポジションを見る必要がある）
+    if ((int)($f['発売中'] ?? 0) !== 1) continue;
+    $positions = getStorePositions($f);
+    if (!in_array($store_id, $positions, true)) continue;
     $n = trim($f['商品名'] ?? '');
     if ($n === '') continue;
+
+    // 本体価格：店舗別設定 → 本部設定の順にフォールバックし、セール価格があればさらに優先（sales_entry.php と同方式）
+    $store_honbai = getStoreHonbaiPrice($f, $store_id);
+    $base_price   = ($store_honbai > 0) ? $store_honbai : (int)($f['本体価格'] ?? 0);
+    $sale_price   = getStoreSalePrice($f, $store_id);
+
     $all_products[] = [
         'bumon' => trim($f['部門']     ?? ''),
         'name'  => $n,
+        'yomi'  => trim($f['よみがな'] ?? ''),
         'tani'  => trim($f['販売単位'] ?? ''),
-        'price' => (int)($f['本体価格'] ?? 0),
+        'price' => ($sale_price > 0) ? $sale_price : $base_price,
     ];
 }
-usort($all_products, fn($a,$b) => strcmp($a['yomi'] ?? $a['name'], $b['yomi'] ?? $b['name']));
+usort($all_products, fn($a,$b) => strcmp($a['yomi'] ?: $a['name'], $b['yomi'] ?: $b['name']));
 
 // 元データをJS用に整形
 $initial_cart = array_map(fn($it) => [

@@ -209,9 +209,12 @@ foreach ($res2['result']['response']['data'] ?? [] as $row) {
     // 部門名をカテゴリーにマッピング
     $cat = $category_map[$b] ?? $b;
 
-    // 店舗のセール価格（未設定=0の場合は本体価格を使用）
+    // 本体価格：店舗別に設定されていればそれを使用、なければ本部設定の本体価格
+    $store_honbai = getStoreHonbaiPrice($f, $store_id);
+    $base_price   = ($store_honbai > 0) ? $store_honbai : (int)($f['本体価格'] ?? 0);
+    // セール価格が設定されていればさらに優先
     $sale_price = getStoreSalePrice($f, $store_id);
-    $disp_price = ($sale_price > 0) ? $sale_price : (int)($f['本体価格'] ?? 0);
+    $disp_price = ($sale_price > 0) ? $sale_price : $base_price;
 
     $products[] = [
         'bumon'      => $cat,

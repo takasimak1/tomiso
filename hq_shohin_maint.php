@@ -63,15 +63,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dbg = ['rid' => $rid, 'selected_stores' => $selectedStoreIds];
         if ($rid) {
             // 編集: ページロード時に渡されたポジション情報を使用（getRecord 不要）
-            $currentPositions  = json_decode($_POST['current_positions']  ?? '{}', true) ?: [];
-            $currentSalePrices = json_decode($_POST['current_sale_prices'] ?? '{}', true) ?: [];
-            $storeData = buildStoreFieldData($selectedStoreIds, $currentPositions, $currentSalePrices);
+            $currentPositions    = json_decode($_POST['current_positions']    ?? '{}', true) ?: [];
+            $currentSalePrices   = json_decode($_POST['current_sale_prices']  ?? '{}', true) ?: [];
+            $currentHonbaiPrices = json_decode($_POST['current_honbai_prices'] ?? '{}', true) ?: [];
+            $storeData = buildStoreFieldData($selectedStoreIds, $currentPositions, $currentSalePrices,
+                                              $currentHonbaiPrices, $fields['本体価格']);
             $dbg['current_positions']  = $currentPositions;
             $dbg['store_data_sample']  = array_slice($storeData, 0, 4, true); // 最初の4フィールドのみ
             $res = $fm->editRecord($rid, ['fieldData' => array_merge($fields, $storeData)]);
         } else {
-            // 新規: 空のポジションマップで構築
-            $storeData = buildStoreFieldData($selectedStoreIds);
+            // 新規: 空のポジションマップで構築（選択店舗には本部設定の本体価格を初期値にする）
+            $storeData = buildStoreFieldData($selectedStoreIds, [], [], [], $fields['本体価格']);
             $dbg['store_data_sample']  = array_slice($storeData, 0, 4, true);
             $res = $fm->createRecord(['fieldData' => array_merge($fields, $storeData)]);
         }
@@ -125,22 +127,24 @@ foreach ($res['result']['response']['data'] ?? [] as $row) {
 
     $pos_map     = getStorePositions($f);               // [pos => storeId]
     $sp_map      = getRepeatValues($f, 'セール価格');   // [pos => price]
+    $hp_map      = getRepeatValues($f, '店舗本体価格'); // [pos => 店舗別本体価格]
     $store_ids   = array_values($pos_map);              // ['101', '102', ...]
     $store_names = array_map(fn($id) => $stores[$id] ?? $id, $store_ids);
 
     $products[] = [
-        'record_id'   => $row['recordId'],
-        'name'        => $n,
-        'bumon'       => trim($f['部門']     ?? ''),
-        'yomi'        => trim($f['よみがな'] ?? ''),
-        'price'       => (int)($f['本体価格'] ?? 0),
-        'tani'        => trim($f['販売単位'] ?? ''),
-        'hanbai_chu'  => (int)($f['発売中']  ?? 1),
-        'sale'        => (int)($f['セール']  ?? 0),
-        'store_ids'   => $store_ids,
-        'store_names' => $store_names,
-        'positions'   => $pos_map,   // pos→storeId（保存時に getRecord 不要にするため）
-        'sale_prices' => $sp_map,    // pos→price（セール価格保持のため）
+        'record_id'     => $row['recordId'],
+        'name'          => $n,
+        'bumon'         => trim($f['部門']     ?? ''),
+        'yomi'          => trim($f['よみがな'] ?? ''),
+        'price'         => (int)($f['本体価格'] ?? 0),
+        'tani'          => trim($f['販売単位'] ?? ''),
+        'hanbai_chu'    => (int)($f['発売中']  ?? 1),
+        'sale'          => (int)($f['セール']  ?? 0),
+        'store_ids'     => $store_ids,
+        'store_names'   => $store_names,
+        'positions'     => $pos_map,   // pos→storeId（保存時に getRecord 不要にするため）
+        'sale_prices'   => $sp_map,    // pos→price（セール価格保持のため）
+        'honbai_prices' => $hp_map,    // pos→price（店舗別本体価格保持のため）
     ];
 }
 
@@ -745,9 +749,10 @@ function saveProduct(e) {
         tani                : document.getElementById('f-tani').value,
         hanbai_chu          : document.getElementById('f-hanbai-chu').checked ? '1' : '0',
         sale                : document.getElementById('f-sale').checked ? '1' : '0',
-        // ページロード時の positions/sale_prices をそのまま返す（getRecord 不要）
-        current_positions   : JSON.stringify(_editData ? (_editData.positions   || {}) : {}),
-        current_sale_prices : JSON.stringify(_editData ? (_editData.sale_prices || {}) : {}),
+        // ページロード時の positions/sale_prices/honbai_prices をそのまま返す（getRecord 不要）
+        current_positions     : JSON.stringify(_editData ? (_editData.positions     || {}) : {}),
+        current_sale_prices   : JSON.stringify(_editData ? (_editData.sale_prices   || {}) : {}),
+        current_honbai_prices : JSON.stringify(_editData ? (_editData.honbai_prices || {}) : {}),
     });
     // 選択された店舗を追加（配列として）
     document.querySelectorAll('.store-cb:checked').forEach(function(cb) {

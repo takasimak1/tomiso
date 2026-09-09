@@ -81,13 +81,24 @@ function getStoreSalePrice(array $f, string $storeId): int {
     return (int)($f[repeatKey('セール価格', $pos)] ?? 0);
 }
 
+/** 特定店舗の本体価格（店舗別。0=未設定＝本部設定の本体価格を使う）を取得 */
+function getStoreHonbaiPrice(array $f, string $storeId): int {
+    $positions = getStorePositions($f);
+    $pos = array_search($storeId, $positions);
+    if ($pos === false) return 0;
+    return (int)($f[repeatKey('店舗本体価格', $pos)] ?? 0);
+}
+
 /**
  * 取扱店舗チェックボックスの保存用 fieldData を構築
- * @param array $selectedStoreIds  選択された店舗IDの配列（順序不問）
- * @param array $currentSalePrices 現在の [pos => salePrice] を保持するため
- * @param array $currentPositions  現在の [pos => storeId]
+ * @param array $selectedStoreIds   選択された店舗IDの配列（順序不問）
+ * @param array $currentPositions   現在の [pos => storeId]
+ * @param array $currentSalePrices  現在の [pos => salePrice] を保持するため
+ * @param array $currentHonbaiPrices 現在の [pos => 店舗本体価格] を保持するため
+ * @param int   $masterHonbaiPrice  本部設定の本体価格（新規に選択された店舗の初期値）
  */
-function buildStoreFieldData(array $selectedStoreIds, array $currentPositions = [], array $currentSalePrices = []): array {
+function buildStoreFieldData(array $selectedStoreIds, array $currentPositions = [], array $currentSalePrices = [],
+                              array $currentHonbaiPrices = [], int $masterHonbaiPrice = 0): array {
     // 選択店舗を既存ポジション優先で割り当て
     $newPositions = []; // pos => storeId
     // 既存ポジションで選択済みのものを維持
@@ -114,17 +125,27 @@ function buildStoreFieldData(array $selectedStoreIds, array $currentPositions = 
         $data[repeatKey('取扱店舗', $i)]  = $newPositions[$i] ?? '';
         // セール価格は既存ポジションが維持された場合のみ保持
         $data[repeatKey('セール価格', $i)] = isset($newPositions[$i]) ? ($currentSalePrices[$i] ?? '') : '';
+        // 店舗本体価格は既存値を保持。値が無い（新規選択・未設定）場合は本部設定の本体価格を初期値にする
+        if (isset($newPositions[$i])) {
+            $existing = $currentHonbaiPrices[$i] ?? '';
+            $data[repeatKey('店舗本体価格', $i)] = ($existing !== '' && $existing !== 0) ? $existing : $masterHonbaiPrice;
+        } else {
+            $data[repeatKey('店舗本体価格', $i)] = '';
+        }
     }
     return $data;
 }
 
-/** 取扱店舗に1店舗追加する（次の空きポジションに）*/
-function addStoreFieldData(array $f, string $storeId): array {
+/** 取扱店舗に1店舗追加する（次の空きポジションに。店舗本体価格は本部設定価格を初期値にする）*/
+function addStoreFieldData(array $f, string $storeId, int $masterHonbaiPrice = 0): array {
     $positions = getStorePositions($f);
     if (in_array($storeId, $positions)) return []; // 既存
     for ($i = 1; $i <= MAX_STORE_REPS; $i++) {
         if (!isset($positions[$i])) {
-            return [repeatKey('取扱店舗', $i) => $storeId];
+            return [
+                repeatKey('取扱店舗', $i)   => $storeId,
+                repeatKey('店舗本体価格', $i) => $masterHonbaiPrice,
+            ];
         }
     }
     return []; // 満杯
@@ -138,6 +159,7 @@ function removeStoreFieldData(array $f, string $storeId): array {
     return [
         repeatKey('取扱店舗', $pos)  => '',
         repeatKey('セール価格', $pos) => '',
+        repeatKey('店舗本体価格', $pos) => '',
     ];
 }
 
