@@ -7,6 +7,13 @@
 LOCAL="$HOME/Documents/Claude/Projects/富惣/FileMakerDataAPI/富惣_FileMakerDataAPI/tomiso/"
 REMOTE="keiiti@keiiti.sakura.ne.jp:~/www/kei1/tomiso/"
 
+# 注意：サーバーに絶対アップしたくない資料（提案書・社内Excel等）は
+# 「除外指定」ではなく、必ず tomiso/ の外（例：一つ上の階層）に置くこと。
+# 過去に「サーバにアップしない資料/」を --exclude していたが、macOS（NFD）と
+# rsync除外パターン（NFC）の文字コード正規化の違いにより除外が効かず、
+# 本番サーバーに誤ってアップロードされてしまった事故が発生している。
+# tomiso/ の外に置けば、除外パターンのマッチに関係なく物理的に同期対象外になる。
+
 echo "======================================"
 echo " ととレジ デプロイ"
 echo " → $REMOTE"
@@ -20,7 +27,6 @@ rsync -avz --dry-run --delete \
   --exclude='.gitignore' \
   --exclude='fm_config_secret.php' \
   --exclude='fm_config_secret.php.example' \
-  --exclude='サーバにアップしない資料/' \
   --exclude='setup_git_mac.sh' \
   --exclude='deploy.sh' \
   --exclude='README.md' \
@@ -48,7 +54,6 @@ rsync -avz --delete \
   --exclude='.gitignore' \
   --exclude='fm_config_secret.php' \
   --exclude='fm_config_secret.php.example' \
-  --exclude='サーバにアップしない資料/' \
   --exclude='setup_git_mac.sh' \
   --exclude='deploy.sh' \
   --exclude='README.md' \
