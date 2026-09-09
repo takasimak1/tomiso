@@ -77,6 +77,23 @@ $all_busho = [
 
 // ---- 上代（毎日1回・「今日はこれだけ売るつもり」の合計目標額。部門別ではなく合計のみ入力） ----
 
+// ---- 時間帯別 部門売上フィールド（12時/15時/17時。閉店後と同じ部門構成） ----
+$time_slots = [
+    '12' => ['label' => '🕛 12時', 'action' => 'save_12', 'fm_suffix' => '12時', 'field_kyaku' => '客数_12時'],
+    '15' => ['label' => '🕒 15時', 'action' => 'save_15', 'fm_suffix' => '15時', 'field_kyaku' => '客数_15時'],
+    '17' => ['label' => '🕔 17時', 'action' => 'save_17', 'fm_suffix' => '17時', 'field_kyaku' => '客数_17時'],
+];
+function bushoTimeField(string $bushoField, string $fmSuffix): string {
+    return $bushoField . '_' . $fmSuffix;
+}
+// 部門フィールド一覧（閉店後＋各時間帯）。FMレイアウト未登録時のフォールバック判定に使用
+$busho_and_time_keys = array_keys($all_busho);
+foreach ($time_slots as $slot) {
+    foreach (array_keys($all_busho) as $bf) {
+        $busho_and_time_keys[] = bushoTimeField($bf, $slot['fm_suffix']);
+    }
+}
+
 // ---- FM 接続 ----
 $fm = new fmRESTor($host, $db, $layout_daily_report,
                    $api_master_user, $api_master_pass, ['allowInsecure' => true]);
@@ -152,14 +169,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 上代は確定後も編集可能（実績とは別の「目標額」のため）
     if ($is_kakutei && $action !== 'save_joudai') goto skip_save;
 
+    $time_slot_by_action = array_column($time_slots, null, 'action');
+
     if ($action === 'save_joudai') {
         $save['上代合計'] = _int('上代合計');
-    } elseif ($action === 'save_12') {
-        $save = ['客数_12時' => _int('客数_12時'), '売上累計_12時' => _int('売上累計_12時')];
-    } elseif ($action === 'save_15') {
-        $save = ['客数_15時' => _int('客数_15時'), '売上累計_15時' => _int('売上累計_15時')];
-    } elseif ($action === 'save_17') {
-        $save = ['客数_17時' => _int('客数_17時'), '売上累計_17時' => _int('売上累計_17時')];
+    } elseif (isset($time_slot_by_action[$action])) {
+        $slot = $time_slot_by_action[$action];
+        $save[$slot['field_kyaku']] = _int($slot['field_kyaku']);
+        foreach (array_keys($all_busho) as $bf) {
+            $tf = bushoTimeField($bf, $slot['fm_suffix']);
+            $save[$tf] = _int($tf);
+        }
     } elseif ($action === 'save_heiten' || $action === 'kakutei') {
         foreach (array_keys($all_busho) as $f) {
             $save[$f] = _int($f);
@@ -176,12 +196,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $save[$f] = 0;
         }
         $save['客数_閉店後']   = 0;
-        $save['客数_12時']     = 0;
-        $save['売上累計_12時'] = 0;
-        $save['客数_15時']     = 0;
-        $save['売上累計_15時'] = 0;
-        $save['客数_17時']     = 0;
-        $save['売上累計_17時'] = 0;
+        foreach ($time_slots as $slot) {
+            $save[$slot['field_kyaku']] = 0;
+            foreach (array_keys($all_busho) as $bf) {
+                $save[bushoTimeField($bf, $slot['fm_suffix'])] = 0;
+            }
+        }
         $save['定休日']        = 1;
         $save['入力状態']      = '確定';
         $save['確定日時']      = date('m/d/Y H:i:s');
@@ -210,7 +230,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $record_id = $res['result']['response']['recordId'] ?? null;
             } else {
                 // 部門フィールドを除いてリトライ（レイアウト未登録フィールド対策）
-                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho) && $k !== '定休日', ARRAY_FILTER_USE_KEY);
+                $save_base = array_filter($save, fn($k) => !in_array($k, $busho_and_time_keys, true) && $k !== '定休日', ARRAY_FILTER_USE_KEY);
                 $res2b = $fm->createRecord(['fieldData' => $save_base]);
                 $code2b = (string)($res2b['result']['messages'][0]['code'] ?? '?');
                 if ($code2b === '0') {
@@ -228,7 +248,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $fm_ok = true;
             } else {
                 // 部門フィールドを除いてリトライ
-                $save_base = array_filter($save, fn($k) => !array_key_exists($k, $all_busho) && $k !== '定休日', ARRAY_FILTER_USE_KEY);
+                $save_base = array_filter($save, fn($k) => !in_array($k, $busho_and_time_keys, true) && $k !== '定休日', ARRAY_FILTER_USE_KEY);
                 $res2b = $fm->editRecord($record_id, ['fieldData' => $save_base]);
                 $code2b = (string)($res2b['result']['messages'][0]['code'] ?? '?');
                 if ($code2b === '0') {
@@ -816,23 +836,42 @@ include __DIR__ . '/header.php';
       <span>ととレジ</span>
       <span>前年同曜日</span>
   </div>';
+  // 部門別行のヘッダー（ととレジ列は部門別実績が無いため空欄）
+  $cmp_header_bumon = '<div class="cmp-header">
+      <span></span>
+      <span class="h-input">本　年</span>
+      <span></span>
+      <span>前年同曜日</span>
+  </div>';
 
-  // 時間帯セクション出力関数
-  function timeSec(string $id, string $label, string $action,
-                   string $field_kyaku, string $field_uriage,
+  // 時間帯セクション出力関数（客数は時間帯合計のみ、売上は閉店後と同じ部門別入力）
+  function timeSec(string $suffix, array $slot, array $all_busho,
                    array $fd, array $py_fd, bool $is_kakutei,
-                   string $cmp_header, array $tr): void {
-      $done = (int)($fd[$field_kyaku] ?? 0) > 0;
+                   string $cmp_header, string $cmp_header_bumon, array $tr): void {
+      $label       = $slot['label'];
+      $action      = $slot['action'];
+      $field_kyaku = $slot['field_kyaku'];
+      $fm_suffix   = $slot['fm_suffix'];
+
+      $uriage_total    = 0;
+      $py_uriage_total = 0;
+      foreach ($all_busho as $bf => $_) {
+          $tf = bushoTimeField($bf, $fm_suffix);
+          $uriage_total    += (int)($fd[$tf] ?? 0);
+          $py_uriage_total += (int)($py_fd[$tf] ?? 0);
+      }
+
+      $done = (int)($fd[$field_kyaku] ?? 0) > 0 || $uriage_total > 0;
       echo '<div class="dr-section">';
       echo '<div class="dr-section-head">' . $label;
       if ($done) echo ' <span class="done-mark">✓ 入力済</span>';
       echo '</div>';
       echo '<div class="dr-section-body">';
-      echo $cmp_header;
       echo '<form method="post">';
       echo '<input type="hidden" name="action" value="' . $action . '">';
 
-      // 客数
+      // 客数（時間帯合計のみ・今まで通り）
+      echo $cmp_header;
       $pyv_k = (int)($py_fd[$field_kyaku] ?? 0);
       echo '<div class="cmp-grid">';
       echo '<span class="cmp-label">客　数</span>';
@@ -841,13 +880,24 @@ include __DIR__ . '/header.php';
       echo '<div class="cmp-py">' . ($pyv_k > 0 ? '<span class="py-val">' . number_format($pyv_k) . '</span> 人' : '<span class="py-none">―</span>') . '</div>';
       echo '</div>';
 
-      // 累計売上
-      $pyv_u = (int)($py_fd[$field_uriage] ?? 0);
-      echo '<div class="cmp-grid">';
-      echo '<span class="cmp-label">累計売上</span>';
-      echo '<div><input class="cmp-input" type="number" name="' . $field_uriage . '" inputmode="numeric" value="' . fv($fd, $field_uriage) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">円</span></div>';
-      echo '<div class="cmp-tr">' . trSum($tr) . '</div>';
-      echo '<div class="cmp-py">' . ($pyv_u > 0 ? '<span class="py-val">¥' . number_format($pyv_u) . '</span>' : '<span class="py-none">―</span>') . '</div>';
+      // 累計売上（部門別入力・自店の取扱部門設定を共用）
+      echo $cmp_header_bumon;
+      foreach ($all_busho as $bf => $blabel) {
+          $tf  = bushoTimeField($bf, $fm_suffix);
+          $pyv = (int)($py_fd[$tf] ?? 0);
+          echo '<div class="cmp-grid busho-cmp" data-field="' . $bf . '">';
+          echo '<span class="cmp-label">' . $blabel . '</span>';
+          echo '<div><input class="cmp-input busho-input-' . $suffix . '" type="number" name="' . $tf . '" inputmode="numeric" value="' . fv($fd, $tf) . '" ' . ($is_kakutei ? 'disabled' : '') . ' min="0"><span class="cmp-unit">円</span></div>';
+          echo '<div class="cmp-py">' . ($pyv > 0 ? '<span class="py-val">¥' . number_format($pyv) . '</span>' : '<span class="py-none">―</span>') . '</div>';
+          echo '</div>';
+      }
+
+      // 累計売上 合計行
+      echo '<div class="total-bar">';
+      echo '<span class="t-label">累計売上</span>';
+      echo '<span class="t-this" id="busho-goukei-' . $suffix . '">' . ($uriage_total > 0 ? '¥' . number_format($uriage_total) : '―') . '</span>';
+      echo '<span class="t-tr">' . trSum($tr) . '</span>';
+      echo '<span class="t-py">' . ($py_uriage_total > 0 ? '前年 ¥' . number_format($py_uriage_total) : '') . '</span>';
       echo '</div>';
 
       if (!$is_kakutei) {
@@ -858,17 +908,10 @@ include __DIR__ . '/header.php';
   }
   ?>
 
-  <!-- 12時 -->
-  <?php timeSec('j12', '🕛 12時', 'save_12',
-      '客数_12時', '売上累計_12時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header, $tr_12); ?>
-
-  <!-- 15時 -->
-  <?php timeSec('j15', '🕒 15時', 'save_15',
-      '客数_15時', '売上累計_15時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header, $tr_15); ?>
-
-  <!-- 17時 -->
-  <?php timeSec('j17', '🕔 17時', 'save_17',
-      '客数_17時', '売上累計_17時', $fd, $py_fd, $is_kakutei || $is_future_page, $cmp_header, $tr_17); ?>
+  <?php foreach ($time_slots as $suffix => $slot): ?>
+    <?php timeSec($suffix, $slot, $all_busho, $fd, $py_fd, $is_kakutei || $is_future_page,
+        $cmp_header, $cmp_header_bumon, ${'tr_' . $suffix}); ?>
+  <?php endforeach; ?>
 
   <!-- 閉店後 -->
   <div class="dr-section">
@@ -914,12 +957,6 @@ include __DIR__ . '/header.php';
         <input type="hidden" name="action" id="heiten-action" value="save_heiten">
 
         <!-- 部門一覧（部門別のととレジ実績は対象外のため列は空欄） -->
-        <?php $cmp_header_bumon = '<div class="cmp-header">
-            <span></span>
-            <span class="h-input">本　年</span>
-            <span></span>
-            <span>前年同曜日</span>
-        </div>'; ?>
         <?= $cmp_header_bumon ?>
         <?php foreach ($all_busho as $field => $label): ?>
         <?php $pyv = (int)($py_fd[$field] ?? 0); ?>
@@ -1012,24 +1049,26 @@ document.addEventListener('submit', function (e) {
     });
 }, true);
 
-// ---- 部門合計リアルタイム計算 ----
-function calcGoukei() {
+// ---- 部門合計リアルタイム計算（閉店後・12時・15時・17時 共通） ----
+// 非表示の部門でも送信される（0として計上）ため、合計は表示状態に関係なく全フィールドで計算する
+function calcGoukeiFor(inputClass, totalElId) {
     let total = 0;
-    document.querySelectorAll('.busho-input:not([disabled])').forEach(el => {
-        if (el.closest('.busho-cmp.active')) {
-            total += parseInt(el.value || 0, 10);
-        }
-    });
-    // 非表示でも送信される（0として計上）ので合計は全フィールドで
-    total = 0;
-    document.querySelectorAll('.busho-input').forEach(el => {
+    document.querySelectorAll('.' + inputClass).forEach(el => {
         total += parseInt(el.value || 0, 10);
     });
-    document.getElementById('busho-goukei').textContent =
-        total > 0 ? '¥' + total.toLocaleString() : '―';
+    const el = document.getElementById(totalElId);
+    if (el) el.textContent = total > 0 ? '¥' + total.toLocaleString() : '―';
 }
-document.querySelectorAll('.busho-input').forEach(el => {
-    el.addEventListener('input', calcGoukei);
+const BUSHO_TOTAL_TARGETS = [
+    ['busho-input',    'busho-goukei'],
+    ['busho-input-12', 'busho-goukei-12'],
+    ['busho-input-15', 'busho-goukei-15'],
+    ['busho-input-17', 'busho-goukei-17'],
+];
+BUSHO_TOTAL_TARGETS.forEach(([inputClass, totalElId]) => {
+    document.querySelectorAll('.' + inputClass).forEach(el => {
+        el.addEventListener('input', () => calcGoukeiFor(inputClass, totalElId));
+    });
 });
 
 // ---- 部門設定 localStorage ----
@@ -1053,7 +1092,7 @@ function applyBumonSetting(activeFields) {
     document.querySelectorAll('.busho-cmp').forEach(row => {
         row.classList.toggle('active', activeFields.includes(row.dataset.field));
     });
-    // calcGoukei() は初期化時に呼ばない。
+    // calcGoukeiFor() は初期化時に呼ばない。
     // FM合計売上（サーバーレンダリング値）を保持するため、
     // ユーザーが入力フィールドを編集したときのみ更新する。
 }

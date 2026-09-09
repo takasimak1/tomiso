@@ -36,6 +36,27 @@ $days_in_month = (int)date('t', mktime(0,0,0,$sel_month,1,$sel_year));
 // 曜日ラベル
 $week_ja  = ['Sun'=>'日','Mon'=>'月','Tue'=>'火','Wed'=>'水','Thu'=>'木','Fri'=>'金','Sat'=>'土'];
 
+// ---- 部門一覧（12時/15時/17時の部門別売上フィールド算出用。閉店後と同一） ----
+$all_busho = [
+    '売上_天ぷら', '売上_魚', '売上_唐揚', '売上_冷惣菜', '売上_催事', '売上_イカ焼',
+    '売上_エキタカ', '売上_くじら', '売上_コンビニデリカ', '売上_セルフ唐揚',
+    '売上_セルフ天丼', '売上_セルフ惣菜', '売上_フライ', '売上_串揚', '売上_丼',
+    '売上_個食', '売上_弁当', '売上_弁当Ⅱ', '売上_生串揚', '売上_鯛',
+];
+
+/**
+ * 時間帯の累計売上を算出する。
+ * 部門別入力への移行前（旧・単一フィールド）／移行後（新・部門別フィールド合計）の
+ * どちらか一方にしか値が入らないため、両方を単純に加算すれば月をまたいでも集計が途切れない。
+ */
+function jikanbetsuUriage(array $f, string $legacyField, string $fmSuffix, array $all_busho): int {
+    $v = (int)($f[$legacyField] ?? 0);
+    foreach ($all_busho as $bf) {
+        $v += (int)($f[$bf . '_' . $fmSuffix] ?? 0);
+    }
+    return $v;
+}
+
 // ---- FM 取得 ----
 $first_fm = sprintf('%02d/01/%04d', $sel_month, $sel_year);
 $last_fm  = sprintf('%02d/%02d/%04d', $sel_month, $days_in_month, $sel_year);
@@ -80,11 +101,11 @@ if (($r['result']['messages'][0]['code'] ?? '0') !== '401') {
         if ($day < 1 || $day > $days_in_month) continue;
 
         $daily[$day]['kyaku_12']     += (int)($f['客数_12時']         ?? 0);
-        $daily[$day]['uriage_12']    += (int)($f['売上累計_12時']     ?? 0);
+        $daily[$day]['uriage_12']    += jikanbetsuUriage($f, '売上累計_12時', '12時', $all_busho);
         $daily[$day]['kyaku_15']     += (int)($f['客数_15時']         ?? 0);
-        $daily[$day]['uriage_15']    += (int)($f['売上累計_15時']     ?? 0);
+        $daily[$day]['uriage_15']    += jikanbetsuUriage($f, '売上累計_15時', '15時', $all_busho);
         $daily[$day]['kyaku_17']     += (int)($f['客数_17時']         ?? 0);
-        $daily[$day]['uriage_17']    += (int)($f['売上累計_17時']     ?? 0);
+        $daily[$day]['uriage_17']    += jikanbetsuUriage($f, '売上累計_17時', '17時', $all_busho);
         $daily[$day]['kyaku_heiten'] += (int)($f['客数_閉店後']       ?? 0);
         $daily[$day]['uriage_total'] += (int)($f['合計売上']          ?? 0);
         $daily[$day]['kareisan']     += (int)($f['からすかれい_製造数'] ?? 0);
